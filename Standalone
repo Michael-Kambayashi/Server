@@ -1,0 +1,258 @@
+-- ============================================================================
+-- 1. CONFIGURATION & CLEANUP
+-- ============================================================================
+
+-- A. YOUR ACCOUNT WHITELIST
+local MY_ACCOUNTS = {
+    "GymCinnabun", "HazeYungWasp", "N9CCI5LUELVJPLUt", 
+    "LiraNadirCarry", "AFKAdlington", "BossUpBloxDawg",
+    "YoNewbNewt", "ResidentCarry", "TravelerSmurf",
+    "FlickFloret21", "SteelZeroEZ", "EchoBroPlayoff",
+    "TrollTheOwl", "AzureRblxMedal" 
+}
+
+-- B. FARM CODES
+local RESET_STRING = "\x13\x1D$\xEDC" 
+local TEAM_T  = "s\n\x00Terrorists"
+local TEAM_CT = "s\x12\x00Counter-Terrorists"
+
+-- C. CLEANUP
+if getgenv().FarmConnections then
+    for _, connection in pairs(getgenv().FarmConnections) do
+        connection:Disconnect()
+    end
+end
+getgenv().FarmConnections = {}
+
+-- ============================================================================
+-- 2. SERVICES & HOPPER
+-- ============================================================================
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local Lighting = game:GetService("Lighting")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
+local GuiService = game:GetService("GuiService")
+local LocalPlayer = Players.LocalPlayer
+
+RunService:Set3dRenderingEnabled(false)
+
+local ByteNet = ReplicatedStorage:WaitForChild("ByteNetReliable")
+local RemotesModule = require(ReplicatedStorage.Database.Security.Remotes)
+local VoteKickRemotes = RemotesModule.VoteKick
+
+print("--- TERRORIST (ONE-SHOT MIDGAME) STARTED ---")
+
+-- RANDOMIZED HOPPER
+local function ServerHop()
+    print("Finding a random good server...")
+    local PlaceID = game.PlaceId
+    
+    local function GetServers()
+        local cursor = ""
+        local goodServers = {}
+        for i = 1, 5 do
+            local url = 'https://games.roblox.com/v1/games/' .. PlaceID .. '/servers/Public?sortOrder=Desc&limit=100'
+            if cursor ~= "" then url = url .. "&cursor=" .. cursor end
+            local success, result = pcall(function() return HttpService:JSONDecode(game:HttpGet(url)) end)
+            if success and result and result.data then
+                for _, server in pairs(result.data) do
+                    if server.playing < server.maxPlayers and server.playing > 1 and server.id ~= game.JobId then
+                        table.insert(goodServers, server.id)
+                    end
+                end
+                if result.nextPageCursor then cursor = result.nextPageCursor else break end
+            end
+        end
+        return goodServers
+    end
+
+    local serverList = GetServers()
+    if #serverList > 0 then
+        local randomID = serverList[math.random(1, #serverList)]
+        TeleportService:TeleportToPlaceInstance(PlaceID, randomID, LocalPlayer)
+    else
+        task.wait(3); ServerHop()
+    end
+end
+
+-- EMERGENCY HOP
+local function EmergencyHop()
+    print("EMERGENCY HOP!")
+    if syn and syn.queue_on_teleport then
+        syn.queue_on_teleport([[game:GetService("TeleportService"):Teleport(game.PlaceId)]])
+    end
+    TeleportService:Teleport(game.PlaceId, LocalPlayer)
+end
+
+-- ============================================================================
+-- 3. SELF-DEFENSE & COLLISION
+-- ============================================================================
+
+local function IsStranger(player)
+    for _, name in pairs(MY_ACCOUNTS) do
+        if player.Name == name then return false end
+    end
+    return true
+end
+
+-- A. VOTEKICK EVASION
+VoteKickRemotes.StartVote.Listen(function(data)
+    local targetId = tonumber(data.TargetUserId)
+    local myId = tonumber(LocalPlayer.UserId)
+    if targetId == myId then
+        print("VOTE ON SELF DETECTED! EVADING!")
+        EmergencyHop()
+    end
+end)
+
+-- B. KICK MESSAGE DETECTION
+local function AntiKick()
+    GuiService.ErrorMessageChanged:Connect(function()
+        local err = GuiService:GetErrorMessage()
+        if err and (string.find(err, "kick") or string.find(err, "disconnect")) then
+            print("DISCONNECT DETECTED! HOPPING...")
+            EmergencyHop()
+        end
+    end)
+    LocalPlayer.OnTeleport:Connect(function(State)
+        if State == Enum.TeleportState.Failed then EmergencyHop() end
+    end)
+end
+task.spawn(AntiKick)
+
+-- C. COLLISION CHECK
+local collisionDetected = false
+for _, p in pairs(Players:GetPlayers()) do
+    if p ~= LocalPlayer and not IsStranger(p) then
+        print("COLLISION: " .. p.Name)
+        collisionDetected = true
+        break
+    end
+end
+
+if collisionDetected then ServerHop(); return end
+
+-- ============================================================================
+-- 4. FARM LOGIC (TERRORIST)
+-- ============================================================================
+
+-- HELPER: Join T Only (Used in Lobby Loop)
+local function JoinTerroristOnly()
+    task.spawn(function()
+        for i = 1, 5 do 
+            ByteNet:FireServer(buffer.fromstring(TEAM_T), nil)
+            task.wait(1)
+        end
+    end)
+end
+
+-- HELPER: Kill (Reset)
+local function TryKill()
+    local char = LocalPlayer.Character
+    if char and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 then
+        local args = { buffer.fromstring(RESET_STRING), nil }
+        ByteNet:FireServer(unpack(args))
+    end
+end
+
+-- STATE HANDLER (The Main Loop Logic)
+local function OnStateChanged()
+    local state = Workspace:GetAttribute("GameState")
+    
+    if state == "Intermission" or state == "Warmup" then
+        -- LOBBY: Join Terrorist Team
+        JoinTerroristOnly()
+        
+    elseif state == "Round In Progress" then
+        -- MID-GAME LOOP:
+        -- WE DO NOT JOIN TEAMS HERE.
+        -- We only reset to end the round.
+        task.delay(0.5, TryKill)
+    end
+end
+local stateConn = Workspace:GetAttributeChangedSignal("GameState"):Connect(OnStateChanged)
+table.insert(getgenv().FarmConnections, stateConn)
+
+local function DestroyMap(child)
+    if child.Name == "Map" then task.delay(0.1, function() if child then child:Destroy() end end) end
+end
+local mapConn = Workspace.ChildAdded:Connect(DestroyMap)
+table.insert(getgenv().FarmConnections, mapConn)
+
+if Workspace:FindFirstChild("Map") then Workspace.Map:Destroy() end
+Lighting:ClearAllChildren()
+
+local function handleCharacter(char)
+    task.spawn(function()
+        local root = char:WaitForChild("HumanoidRootPart", 10)
+        if root then
+            task.wait(0.1)
+            root.Anchored = true 
+            root.Velocity = Vector3.new(0,0,0)
+        end
+    end)
+    -- Mid-Game Kill Check
+    if Workspace:GetAttribute("GameState") == "Round In Progress" then
+        task.wait(0.5); TryKill()
+    end
+end
+local charConn = LocalPlayer.CharacterAdded:Connect(handleCharacter)
+table.insert(getgenv().FarmConnections, charConn)
+if LocalPlayer.Character then handleCharacter(LocalPlayer.Character) end
+
+local function OnPlayerCharAdded(char)
+    if char.Name ~= LocalPlayer.Name then task.wait(); char:Destroy() end
+end
+for _, player in pairs(Players:GetPlayers()) do
+    if player ~= LocalPlayer then
+        local conn = player.CharacterAdded:Connect(OnPlayerCharAdded)
+        table.insert(getgenv().FarmConnections, conn)
+        if player.Character then player.Character:Destroy() end
+    end
+end
+local pAddC = Players.PlayerAdded:Connect(function(player)
+    local conn = player.CharacterAdded:Connect(OnPlayerCharAdded)
+    table.insert(getgenv().FarmConnections, conn)
+end)
+table.insert(getgenv().FarmConnections, pAddC)
+
+local function SafetyCheck(player)
+    if not IsStranger(player) then
+        print("LATE COLLISION: " .. player.Name .. " joined! Hopping...")
+        ServerHop()
+    end
+end
+local safetyConn = Players.PlayerAdded:Connect(SafetyCheck)
+table.insert(getgenv().FarmConnections, safetyConn)
+
+-- ============================================================================
+-- 5. ONE-SHOT STARTUP CHECK
+-- ============================================================================
+-- This runs ONLY ONCE when you execute the script.
+
+local currentState = Workspace:GetAttribute("GameState")
+
+if currentState == "Intermission" or currentState == "Warmup" then
+    -- CASE 1: Lobby. Standard behavior.
+    JoinTerroristOnly()
+
+elseif currentState == "Round In Progress" or currentState == "Buy Period" then
+    -- CASE 2: MID-GAME INJECTION.
+    -- We run the "Shotgun Approach": Try T, Try CT, Kill. Then Stop.
+    print("Mid-Match Startup: One-Shot Join Sequence...")
+    
+    task.spawn(function()
+        -- 1. Try T (Once)
+        ByteNet:FireServer(buffer.fromstring(TEAM_T), nil)
+        task.wait(0.5)
+        
+        -- 2. Try CT (Once - Backup)
+        ByteNet:FireServer(buffer.fromstring(TEAM_CT), nil)
+        task.wait(1.0) 
+     
+        -- The logic ends here. The OnStatesChanged loop will handle future rounds.
+    end)
+end
