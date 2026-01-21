@@ -1,0 +1,334 @@
+-- ============================================================================
+-- 1. CONFIGURATION & CLEANUP (T-SIDE / LOSER)
+-- ============================================================================
+
+-- A. YOUR ACCOUNT WHITELIST
+local MY_ACCOUNTS = {
+    "GymCinnabun", "HazeYungWasp", "N9CCI5LUELVJPLUt", 
+    "LiraNadirCarry", "AFKAdlington", "BossUpBloxDawg",
+    "YoNewbNewt", "ResidentCarry", "TravelerSmurf",
+    "FlickFloret21", "SteelZeroEZ", "EchoBroPlayoff",
+    "TrollTheOwl", "AzureRblxMedal"
+}
+
+-- B. SETTINGS
+local RESET_STRING = "\x13\x1D$\xEDC" 
+local TEAM_STRING = "s\n\x00Terrorists"
+local MIN_ACCOUNTS_TO_KICK = 5 
+local STARTUP_DELAY = 10       
+
+-- C. SERVER HOPPER SETTINGS
+local HOPPER_ENABLED = false 
+local TARGET_PLACE_ID = 114234929420007
+local GITHUB_URL = "https://raw.githubusercontent.com/Michael-Kambayashi/Server/refs/heads/main/list"
+local CHECK_INTERVAL = 300 
+
+-- D. REJOIN SETTINGS (Anti-AFK Fix)
+local REJOIN_INTERVAL = 480 -- ~8 Minutes
+
+-- E. CLEANUP
+if getgenv().FarmConnections then
+    for _, connection in pairs(getgenv().FarmConnections) do
+        connection:Disconnect()
+    end
+end
+getgenv().FarmConnections = {}
+getgenv().PauseFarm = false 
+getgenv().CurrentRunID = math.random(1, 10000000)
+
+-- ============================================================================
+-- 2. SERVICES & PRIORITY CHECK
+-- ============================================================================
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local Lighting = game:GetService("Lighting")
+local TeleportService = game:GetService("TeleportService")
+local LocalPlayer = Players.LocalPlayer
+
+-- *** PRIORITY SERVER CHECK ***
+if HOPPER_ENABLED then
+    print("PRIORITY CHECK: Verifying Server ID from GitHub...")
+    local success, result = pcall(function()
+        return game:HttpGet(GITHUB_URL)
+    end)
+
+    if success and result then
+        local targetId = result:gsub("%s+", "")
+        
+        if #targetId > 10 and targetId ~= game.JobId then
+            print("WRONG SERVER DETECTED! Teleporting immediately.")
+            TeleportService:TeleportToPlaceInstance(TARGET_PLACE_ID, targetId, LocalPlayer)
+            return -- STOP EXECUTION
+        else
+            print("Correct Server ID Confirmed. Starting Farm...")
+        end
+    else
+        warn("GitHub Check Failed. Proceeding with farm anyway.")
+    end
+else
+    print("Priority Hopper Disabled. Starting Farm...")
+end
+
+RunService:Set3dRenderingEnabled(false)
+
+local ByteNet = ReplicatedStorage:WaitForChild("ByteNetReliable")
+local RemotesModule = require(ReplicatedStorage.Database.Security.Remotes)
+local VoteKickRemotes = RemotesModule.VoteKick
+
+print("--- TERRORIST (LOSER) ZERO-LOOP FARM STARTED ---")
+
+-- ============================================================================
+-- 3. VOTEKICK LOGIC (SECURITY)
+-- ============================================================================
+
+local function IsStranger(player)
+    for _, name in pairs(MY_ACCOUNTS) do
+        if player.Name == name then return false end
+    end
+    return true
+end
+
+local function VoteYes()
+    pcall(function() VoteKickRemotes.VoteYes.Send({ Voter = tostring(LocalPlayer.UserId), Amount = 0 }) end)
+end
+
+local function VoteNo()
+    pcall(function() VoteKickRemotes.VoteNo.Send({ Voter = tostring(LocalPlayer.UserId), Amount = 0 }) end)
+end
+
+local function InitiateKick(targetPlayer)
+    task.wait(math.random() * 0.5)
+    print("Initiating Kick: " .. targetPlayer.Name)
+    local prefix = "\r\n\x00"
+    local payloadString = prefix .. tostring(targetPlayer.UserId)
+    local args = { buffer.fromstring(payloadString), nil }
+    pcall(function() ByteNet:FireServer(unpack(args)) end)
+end
+
+VoteKickRemotes.StartVote.Listen(function(data)
+    local targetId = tonumber(data.TargetUserId)
+    local p = Players:GetPlayerByUserId(targetId)
+    if p and IsStranger(p) then VoteYes()
+    elseif not p then VoteYes()
+    else VoteNo() end
+end)
+
+-- *** SMART SCANNER ***
+local function ScanAndKick()
+    local strangerFound = false
+    local totalPlayers = 0
+    local myAccountCount = 0
+    
+    for _, p in pairs(Players:GetPlayers()) do
+        totalPlayers = totalPlayers + 1
+        if not IsStranger(p) then myAccountCount = myAccountCount + 1 end
+    end
+    
+    if myAccountCount < MIN_ACCOUNTS_TO_KICK then return totalPlayers, false end
+
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and IsStranger(p) then
+            strangerFound = true
+            task.spawn(function() InitiateKick(p) end)
+        end
+    end
+    
+    if strangerFound then getgenv().PauseFarm = true else getgenv().PauseFarm = false end
+    return totalPlayers, strangerFound
+end
+
+local function OnPlayerAdded(player)
+    if IsStranger(player) then
+        getgenv().PauseFarm = true
+        task.wait(2); ScanAndKick()
+    else
+        task.wait(1); ScanAndKick()
+    end
+end
+local pAddedConn = Players.PlayerAdded:Connect(OnPlayerAdded)
+table.insert(getgenv().FarmConnections, pAddedConn)
+
+-- *** STARTUP & WATCHDOG ***
+local myRunID = getgenv().CurrentRunID
+
+task.spawn(function()
+    print("Startup: Waiting " .. STARTUP_DELAY .. "s...")
+    task.wait(STARTUP_DELAY)
+    print("Startup: Executing first scan.")
+    ScanAndKick()
+end)
+
+task.spawn(function()
+    while task.wait(10) do
+        if getgenv().CurrentRunID ~= myRunID then break end
+        local count, strangers = ScanAndKick()
+        if count >= 14 and not strangers then
+            print("Server Full & Safe. Stopping Watchdog Loop.")
+            break 
+        end
+    end
+end)
+
+-- ============================================================================
+-- 4. FARM LOGIC (LOSER - RESET ENABLED)
+-- ============================================================================
+
+local function TryJoinTeam()
+    task.spawn(function()
+        for i = 1, 10 do 
+            if LocalPlayer.Team and LocalPlayer.Team.Name == "Terrorists" then break end
+            local args = { buffer.fromstring(TEAM_STRING), nil }
+            ByteNet:FireServer(unpack(args))
+            task.wait(1)
+        end
+    end)
+end
+
+local function TryKill()
+    local char = LocalPlayer.Character
+    if char and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 then
+        local args = { buffer.fromstring(RESET_STRING), nil }
+        ByteNet:FireServer(unpack(args))
+    end
+end
+
+local function OnStateChanged()
+    local state = Workspace:GetAttribute("GameState")
+    
+    if state == "Intermission" or state == "Warmup" then
+        TryJoinTeam()
+    elseif state == "Round In Progress" then
+        -- Don't kill if we are busy kicking a stranger
+        if getgenv().PauseFarm then return end 
+        TryKill()
+    end
+end
+local stateConn = Workspace:GetAttributeChangedSignal("GameState"):Connect(OnStateChanged)
+table.insert(getgenv().FarmConnections, stateConn)
+
+local function DestroyMap(child)
+    if child.Name == "Map" then
+        task.delay(0.1, function() if child then child:Destroy() end end)
+    end
+end
+local mapConn = Workspace.ChildAdded:Connect(DestroyMap)
+table.insert(getgenv().FarmConnections, mapConn)
+
+if Workspace:FindFirstChild("Map") then Workspace.Map:Destroy() end
+Lighting:ClearAllChildren()
+
+local function handleCharacter(char)
+    task.spawn(function()
+        local root = char:WaitForChild("HumanoidRootPart", 10)
+        if root then
+            task.wait(0.1)
+            root.Anchored = true 
+            root.Velocity = Vector3.new(0,0,0)
+        end
+    end)
+    -- Mid-Game Kill Check
+    if Workspace:GetAttribute("GameState") == "Round In Progress" then
+        task.wait(0.5); TryKill()
+    end
+end
+local charConn = LocalPlayer.CharacterAdded:Connect(handleCharacter)
+table.insert(getgenv().FarmConnections, charConn)
+if LocalPlayer.Character then handleCharacter(LocalPlayer.Character) end
+
+local function OnPlayerCharAdded(char)
+    if char.Name ~= LocalPlayer.Name then task.wait(); char:Destroy() end
+end
+for _, player in pairs(Players:GetPlayers()) do
+    if player ~= LocalPlayer then
+        local conn = player.CharacterAdded:Connect(OnPlayerCharAdded)
+        table.insert(getgenv().FarmConnections, conn)
+        if player.Character then player.Character:Destroy() end
+    end
+end
+local pAddC = Players.PlayerAdded:Connect(function(player)
+    local conn = player.CharacterAdded:Connect(OnPlayerCharAdded)
+    table.insert(getgenv().FarmConnections, conn)
+end)
+table.insert(getgenv().FarmConnections, pAddC)
+
+-- ============================================================================
+-- 5. BACKGROUND HOPPER CHECK
+-- ============================================================================
+if HOPPER_ENABLED then
+	task.spawn(function()
+		while true do
+			task.wait(CHECK_INTERVAL)
+			local success, result = pcall(function() return game:HttpGet(GITHUB_URL) end)
+			if success and result then
+				local newId = result:gsub("%s+", "")
+				if #newId > 10 and newId ~= game.JobId then
+					print("HOPPER: New GitHub ID Detected! Moving...")
+					TeleportService:TeleportToPlaceInstance(TARGET_PLACE_ID, newId, LocalPlayer)
+				end
+			end
+		end
+	end)
+end
+
+-- ============================================================================
+-- 6. SMART SESSION REFRESH (EVENT-DRIVEN & SAFE)
+-- ============================================================================
+
+-- State Variables for Rejoiner
+getgenv().RejoinTimeReached = false
+local mapVotesCounted = 0
+local targetMapVotes = 2
+
+-- 1. The Timer (Passive)
+task.spawn(function()
+    local waitTime = REJOIN_INTERVAL + math.random(1, 120)
+    print("Session Timer: " .. math.floor(waitTime/60) .. "m.")
+    
+    task.wait(waitTime)
+    
+    getgenv().RejoinTimeReached = true
+    print("Time Limit Reached. Waiting for 2 Map Votes to pass...")
+end)
+
+-- 2. The Listener (Reactive)
+local rejoinConn = Workspace:GetAttributeChangedSignal("GameState"):Connect(function()
+    -- Only run logic if the 13 minutes have passed
+    if not getgenv().RejoinTimeReached then return end
+
+    local state = Workspace:GetAttribute("GameState")
+
+    if state == "Map Voting" then
+        mapVotesCounted = mapVotesCounted + 1
+        print("Map Vote Detected (" .. mapVotesCounted .. "/" .. targetMapVotes .. ")")
+        
+        if mapVotesCounted >= targetMapVotes then
+            print("2nd Map Vote Hit. Refreshing Session...")
+            
+            -- Disconnect listener to prevent double-firing
+            if getgenv().RejoinConnection then 
+                getgenv().RejoinConnection:Disconnect() 
+            end
+            
+            -- Rejoin
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+        end
+    end
+end)
+
+-- Store connection for cleanup
+getgenv().RejoinConnection = rejoinConn
+table.insert(getgenv().FarmConnections, rejoinConn)
+
+-- ============================================================================
+-- 7. STARTUP CHECK
+-- ============================================================================
+local currentState = Workspace:GetAttribute("GameState")
+if currentState == "Intermission" or currentState == "Warmup" then
+    TryJoinTeam()
+elseif currentState == "Round In Progress" then
+    TryJoinTeam()
+    task.wait(1)
+    TryKill()
+end
