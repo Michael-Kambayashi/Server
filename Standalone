@@ -274,49 +274,6 @@ if HOPPER_ENABLED then
 	end)
 end
 
--- ============================================================================
--- 6. SMART SESSION REFRESH (STRICT 2-MAP DELAY)
--- ============================================================================
-task.spawn(function()
-    -- 1. Initial Wait (~13 Minutes)
-    -- The script sleeps here. It ignores everything until this time is up.
-    local waitTime = REFRESH_TIME + math.random(1, 120)
-    print("Session Refresh Timer started: " .. math.floor(waitTime/60) .. " minutes.")
-    task.wait(waitTime)
-    
-    print("Timer Reached. Waiting for the 2nd 'Map Voting' session...")
-    
-    -- 2. Strict Counter Logic
-    local mapVoteCount = 0
-    local targetCount = 2 -- We want to see Map Voting twice before leaving
-    
-    while mapVoteCount < targetCount do
-        -- Wait specifically for the state to CHANGE
-        Workspace:GetAttributeChangedSignal("GameState"):Wait()
-        local state = Workspace:GetAttribute("GameState")
-        
-        -- Only count "Map Voting". Ignore "Game Ending" to prevent double counts.
-        if state == "Map Voting" then
-            mapVoteCount = mapVoteCount + 1
-            print("Map Voting detected (" .. mapVoteCount .. "/" .. targetCount .. ")")
-            
-            if mapVoteCount >= targetCount then
-                break -- We hit the 2nd time, time to leave.
-            end
-            
-            -- IMPORTANT: Wait until this specific Map Voting session IS OVER.
-            -- This prevents the script from counting the same session multiple times.
-            while Workspace:GetAttribute("GameState") == "Map Voting" do
-                task.wait(1)
-            end
-            print("   > Map Voting finished. Waiting for next match...")
-        end
-    end
-    
-    -- 3. Rejoin Same Server
-    print("2nd Map Voting hit. Refreshing Session Now...")
-    TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
-end)
 
 -- ============================================================================
 -- 7. STARTUP CHECK
