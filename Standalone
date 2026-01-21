@@ -4,7 +4,7 @@
 
 -- A. YOUR ACCOUNT WHITELIST
 local MY_ACCOUNTS = {
-    "GymCinnabun", "HazeYungWasp", "N9CCI5LUELVJPLUt", 
+    "GymCinnabun", "HazeYungWasp", "Donk_IWNL", 
     "LiraNadirCarry", "AFKAdlington", "BossUpBloxDawg",
     "YoNewbNewt", "ResidentCarry", "TravelerSmurf",
     "FlickFloret21", "SteelZeroEZ", "EchoBroPlayoff",
@@ -13,16 +13,19 @@ local MY_ACCOUNTS = {
 
 -- B. SETTINGS
 local TEAM_STRING = "s\x12\x00Counter-Terrorists"
-local MIN_ACCOUNTS_TO_KICK = 5 -- Only kick if 5+ of your accounts are here
-local STARTUP_DELAY = 10       -- Wait 10s on inject before kicking
+local MIN_ACCOUNTS_TO_KICK = 5 
+local STARTUP_DELAY = 10       
 
 -- C. SERVER HOPPER SETTINGS
-local HOPPER_ENABLED = false -- Set to true to enable Priority Check
+local HOPPER_ENABLED = false 
 local TARGET_PLACE_ID = 114234929420007
 local GITHUB_URL = "https://raw.githubusercontent.com/Michael-Kambayashi/Server/refs/heads/main/list"
 local CHECK_INTERVAL = 300 
 
--- D. CLEANUP
+-- D. REJOIN SETTINGS (Anti-AFK Fix)
+local REJOIN_INTERVAL = 800 -- ~13 Minutes
+
+-- E. CLEANUP
 if getgenv().FarmConnections then
     for _, connection in pairs(getgenv().FarmConnections) do
         connection:Disconnect()
@@ -44,7 +47,6 @@ local TeleportService = game:GetService("TeleportService")
 local LocalPlayer = Players.LocalPlayer
 
 -- *** PRIORITY SERVER CHECK ***
--- This runs BEFORE any other logic.
 if HOPPER_ENABLED then
     print("PRIORITY CHECK: Verifying Server ID from GitHub...")
     local success, result = pcall(function()
@@ -52,18 +54,11 @@ if HOPPER_ENABLED then
     end)
 
     if success and result then
-        local targetId = result:gsub("%s+", "") -- Remove whitespace
-        
-        -- If ID is valid (>10 chars) AND we are not in that server:
+        local targetId = result:gsub("%s+", "")
         if #targetId > 10 and targetId ~= game.JobId then
-            print("WRONG SERVER DETECTED!")
-            print("Current: " .. game.JobId)
-            print("Target : " .. targetId)
-            print("Teleporting immediately. Script halted.")
-            
+            print("WRONG SERVER DETECTED! Teleporting immediately.")
             TeleportService:TeleportToPlaceInstance(TARGET_PLACE_ID, targetId, LocalPlayer)
-            
-            return -- CRITICAL: Stops the rest of the script from loading!
+            return 
         else
             print("Correct Server ID Confirmed. Starting Farm...")
         end
@@ -74,14 +69,13 @@ else
     print("Priority Hopper Disabled. Starting Farm...")
 end
 
--- If we passed the check, load the rest...
 RunService:Set3dRenderingEnabled(false)
 
 local ByteNet = ReplicatedStorage:WaitForChild("ByteNetReliable")
 local RemotesModule = require(ReplicatedStorage.Database.Security.Remotes)
 local VoteKickRemotes = RemotesModule.VoteKick
 
-print("--- CT (WINNER) ZERO-LOOP FARM + HOPPER STARTED ---")
+print("--- CT (WINNER) ZERO-LOOP FARM + HOPPER + SMART REJOIN ---")
 
 -- ============================================================================
 -- 3. VOTEKICK LOGIC (SECURITY)
@@ -105,18 +99,15 @@ end
 local function InitiateKick(targetPlayer)
     task.wait(math.random() * 0.5)
     print("Initiating Kick: " .. targetPlayer.Name)
-    
     local prefix = "\r\n\x00"
     local payloadString = prefix .. tostring(targetPlayer.UserId)
     local args = { buffer.fromstring(payloadString), nil }
     pcall(function() ByteNet:FireServer(unpack(args)) end)
 end
 
--- EVENT: Vote Started
 VoteKickRemotes.StartVote.Listen(function(data)
     local targetId = tonumber(data.TargetUserId)
     local p = Players:GetPlayerByUserId(targetId)
-    
     if p and IsStranger(p) then VoteYes()
     elseif not p then VoteYes()
     else VoteNo() end
@@ -128,16 +119,13 @@ local function ScanAndKick()
     local totalPlayers = 0
     local myAccountCount = 0
     
-    -- Count Friendlies
     for _, p in pairs(Players:GetPlayers()) do
         totalPlayers = totalPlayers + 1
         if not IsStranger(p) then myAccountCount = myAccountCount + 1 end
     end
     
-    -- Check Threshold
     if myAccountCount < MIN_ACCOUNTS_TO_KICK then return totalPlayers, false end
 
-    -- Kick Strangers
     for _, p in pairs(Players:GetPlayers()) do
         if p ~= LocalPlayer and IsStranger(p) then
             strangerFound = true
@@ -149,15 +137,12 @@ local function ScanAndKick()
     return totalPlayers, strangerFound
 end
 
--- EVENT: New Player Joined
 local function OnPlayerAdded(player)
     if IsStranger(player) then
         getgenv().PauseFarm = true
-        task.wait(2) 
-        ScanAndKick()
+        task.wait(2); ScanAndKick()
     else
-        task.wait(1)
-        ScanAndKick()
+        task.wait(1); ScanAndKick()
     end
 end
 local pAddedConn = Players.PlayerAdded:Connect(OnPlayerAdded)
@@ -166,7 +151,6 @@ table.insert(getgenv().FarmConnections, pAddedConn)
 -- *** STARTUP & WATCHDOG ***
 local myRunID = getgenv().CurrentRunID
 
--- 1. Initial Delayed Start
 task.spawn(function()
     print("Startup: Waiting " .. STARTUP_DELAY .. "s...")
     task.wait(STARTUP_DELAY)
@@ -174,14 +158,10 @@ task.spawn(function()
     ScanAndKick()
 end)
 
--- 2. Watchdog Loop
 task.spawn(function()
     while task.wait(10) do
         if getgenv().CurrentRunID ~= myRunID then break end
-        
         local count, strangers = ScanAndKick()
-        
-        -- Auto-Kill Watchdog if server is full (14) and safe
         if count >= 14 and not strangers then
             print("Server Full & Safe. Stopping Watchdog Loop.")
             break 
@@ -214,9 +194,7 @@ local stateConn = Workspace:GetAttributeChangedSignal("GameState"):Connect(OnSta
 table.insert(getgenv().FarmConnections, stateConn)
 
 local function DestroyMap(child)
-    if child.Name == "Map" then
-        task.delay(0.1, function() if child then child:Destroy() end end)
-    end
+    if child.Name == "Map" then task.delay(0.1, function() if child then child:Destroy() end end) end
 end
 local mapConn = Workspace.ChildAdded:Connect(DestroyMap)
 table.insert(getgenv().FarmConnections, mapConn)
@@ -257,7 +235,6 @@ table.insert(getgenv().FarmConnections, pAddC)
 -- ============================================================================
 -- 5. BACKGROUND HOPPER CHECK
 -- ============================================================================
--- This keeps checking in case the target ID changes WHILE we are playing
 if HOPPER_ENABLED then
 	task.spawn(function()
 		while true do
@@ -274,6 +251,54 @@ if HOPPER_ENABLED then
 	end)
 end
 
+-- ============================================================================
+-- 6. SMART SESSION REFRESH (EVENT-DRIVEN & SAFE)
+-- ============================================================================
+
+-- State Variables for Rejoiner
+getgenv().RejoinTimeReached = false
+local mapVotesCounted = 0
+local targetMapVotes = 2
+
+-- 1. The Timer (Passive)
+task.spawn(function()
+    local waitTime = REJOIN_INTERVAL + math.random(1, 120)
+    print("Session Timer: " .. math.floor(waitTime/60) .. "m.")
+    
+    task.wait(waitTime)
+    
+    getgenv().RejoinTimeReached = true
+    print("Time Limit Reached. Waiting for 2 Map Votes to pass...")
+end)
+
+-- 2. The Listener (Reactive)
+local rejoinConn = Workspace:GetAttributeChangedSignal("GameState"):Connect(function()
+    -- Only run logic if the 13 minutes have passed
+    if not getgenv().RejoinTimeReached then return end
+
+    local state = Workspace:GetAttribute("GameState")
+
+    if state == "Map Voting" then
+        mapVotesCounted = mapVotesCounted + 1
+        print("Map Vote Detected (" .. mapVotesCounted .. "/" .. targetMapVotes .. ")")
+        
+        if mapVotesCounted >= targetMapVotes then
+            print("2nd Map Vote Hit. Refreshing Session...")
+            
+            -- Disconnect listener to prevent double-firing
+            if getgenv().RejoinConnection then 
+                getgenv().RejoinConnection:Disconnect() 
+            end
+            
+            -- Rejoin
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+        end
+    end
+end)
+
+-- Store connection
+getgenv().RejoinConnection = rejoinConn
+table.insert(getgenv().FarmConnections, rejoinConn)
 
 -- ============================================================================
 -- 7. STARTUP CHECK
