@@ -258,7 +258,7 @@ end
 -- State Variables for Rejoiner
 getgenv().RejoinTimeReached = false
 local mapVotesCounted = 0
-local targetMapVotes = 2
+local targetMapVotes = 1
 
 -- 1. The Timer (Passive)
 task.spawn(function()
