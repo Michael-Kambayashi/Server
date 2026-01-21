@@ -3,7 +3,7 @@
 -- ============================================================================
 
 -- A. WEBHOOK SETTINGS
-local WEBHOOK_URL = "https://discord.com/api/webhooks/1463577307510997145/1JTDUuKy735_V1MtEUZebny-2elC3KjiLFzqhFWA-NUAdiTThsUtU9AhDJyvnHaCyNWO"
+local WEBHOOK_URL = "https://webhook.lewisakura.moe/api/webhooks/1463577307510997145/1JTDUuKy735_V1MtEUZebny-2elC3KjiLFzqhFWA-NUAdiTThsUtU9AhDJyvnHaCyNWO"
 
 -- B. YOUR ACCOUNT WHITELIST
 local MY_ACCOUNTS = {
