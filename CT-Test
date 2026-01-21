@@ -36,7 +36,7 @@ getgenv().PauseFarm = false
 getgenv().CurrentRunID = math.random(1, 10000000)
 
 -- ============================================================================
--- 2. SERVICES & PRIORITY CHECK
+-- 2. SERVICES & PRIORITY CHECK (FIXED RETRY LOOP)
 -- ============================================================================
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -54,11 +54,32 @@ if HOPPER_ENABLED then
     end)
 
     if success and result then
-        local targetId = result:gsub("%s+", "")
+        local targetId = result:gsub("%s+", "") -- Clean whitespace
+        
+        -- If ID is valid (>10 chars) AND we are not in that server:
         if #targetId > 10 and targetId ~= game.JobId then
-            print("WRONG SERVER DETECTED! Teleporting immediately.")
-            TeleportService:TeleportToPlaceInstance(TARGET_PLACE_ID, targetId, LocalPlayer)
-            return 
+            print("WRONG SERVER DETECTED!")
+            print("Current: " .. game.JobId)
+            print("Target : " .. targetId)
+            print("Entering Force-Join Loop...")
+
+            -- FORCE JOIN LOOP
+            -- This will retry infinitely until it gets in (e.g., if server is full)
+            task.spawn(function()
+                while true do
+                    local tpSuccess, tpErr = pcall(function()
+                        TeleportService:TeleportToPlaceInstance(TARGET_PLACE_ID, targetId, LocalPlayer)
+                    end)
+                    
+                    if not tpSuccess then
+                        warn("Join Failed (Server Full?): " .. tostring(tpErr))
+                        print("Retrying in 5 seconds...")
+                    end
+                    task.wait(5)
+                end
+            end)
+            
+            return -- CRITICAL: Stop the farm script from running in the wrong server
         else
             print("Correct Server ID Confirmed. Starting Farm...")
         end
@@ -252,13 +273,13 @@ if HOPPER_ENABLED then
 end
 
 -- ============================================================================
--- 6. SMART SESSION REFRESH
+-- 6. SMART SESSION REFRESH (EVENT-DRIVEN & SAFE)
 -- ============================================================================
 
 -- State Variables for Rejoiner
 getgenv().RejoinTimeReached = false
 local mapVotesCounted = 0
-local targetMapVotes = 1
+local targetMapVotes = 1 -- CHANGED TO 1 (Safe for 4min matches)
 
 -- 1. The Timer (Passive)
 task.spawn(function()
@@ -268,37 +289,10 @@ task.spawn(function()
     task.wait(waitTime)
     
     getgenv().RejoinTimeReached = true
-    print("Time Limit Reached. Waiting for 2 Map Votes to pass...")
+    print("Time Limit Reached. Rejoining at NEXT Map Vote...")
 end)
 
--- 2. Robust Rejoin Function (Infinite Retry)
-local function AttemptRejoin()
-    print("Starting Rejoin Loop...")
-    
-    -- Disconnect listener
-    if getgenv().RejoinConnection then 
-        getgenv().RejoinConnection:Disconnect() 
-    end
-
-    -- Loop until successful
-    while true do
-        print("Attempting to join specific server instance...")
-        
-        local success, err = pcall(function()
-            TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
-        end)
-        
-        if not success then
-            warn("Teleport Failed (Server Full?): " .. tostring(err))
-            print("Retrying in 5 seconds (Waiting for Watchdog to kick stranger)...")
-        end
-        
-        -- Wait before trying again to avoid rate limits
-        task.wait(5)
-    end
-end
-
--- 3. The Listener (Reactive)
+-- 2. The Listener (Reactive)
 local rejoinConn = Workspace:GetAttributeChangedSignal("GameState"):Connect(function()
     if not getgenv().RejoinTimeReached then return end
 
@@ -309,23 +303,32 @@ local rejoinConn = Workspace:GetAttributeChangedSignal("GameState"):Connect(func
         print("Map Vote Detected (" .. mapVotesCounted .. "/" .. targetMapVotes .. ")")
         
         if mapVotesCounted >= targetMapVotes then
-            print("2nd Map Vote Hit. Executing Rejoin Sequence...")
-            AttemptRejoin()
+            print("Map Vote Hit. Executing Rejoin Sequence...")
+            
+            -- Disconnect to prevent double-firing
+            if getgenv().RejoinConnection then 
+                getgenv().RejoinConnection:Disconnect() 
+            end
+            
+            -- EXECUTE REJOIN (With Retry Loop)
+            task.spawn(function()
+                while true do
+                    print("Rejoining...")
+                    local success, err = pcall(function()
+                        TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+                    end)
+                    if not success then
+                        warn("Teleport Failed: " .. tostring(err))
+                        print("Retrying in 5s...")
+                    end
+                    task.wait(5)
+                end
+            end)
         end
     end
 end)
 
--- 4. Teleport Fail Handler (Extra Safety)
--- If Roblox throws an error overlay, this tries to force a retry
-LocalPlayer.OnTeleport:Connect(function(State)
-    if State == Enum.TeleportState.Failed then
-        print("Teleport State: FAILED. Retrying immediately...")
-        task.wait(1)
-        AttemptRejoin()
-    end
-end)
-
--- Store connection for cleanup
+-- Store connection
 getgenv().RejoinConnection = rejoinConn
 table.insert(getgenv().FarmConnections, rejoinConn)
 
