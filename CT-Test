@@ -1,5 +1,5 @@
 -- ============================================================================
--- 1. CONFIGURATION & CLEANUP (CT-SIDE / WINNER)
+-- 1. CONFIGURATION & CLEANUP (T-SIDE / LOSER)
 -- ============================================================================
 
 -- A. YOUR ACCOUNT WHITELIST
@@ -12,12 +12,13 @@ local MY_ACCOUNTS = {
 }
 
 -- B. SETTINGS
-local TEAM_STRING = "s\x12\x00Counter-Terrorists"
+local RESET_STRING = "\x13\x1D$\xEDC" 
+local TEAM_STRING = "s\n\x00Terrorists"
 local MIN_ACCOUNTS_TO_KICK = 5 
 local STARTUP_DELAY = 10       
 
 -- C. SERVER HOPPER SETTINGS
-local HOPPER_ENABLED = true
+local HOPPER_ENABLED = true 
 local TARGET_PLACE_ID = 114234929420007
 local GITHUB_URL = "https://raw.githubusercontent.com/Michael-Kambayashi/Server/refs/heads/main/list"
 local CHECK_INTERVAL = 300 
@@ -48,7 +49,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local Lighting = game:GetService("Lighting")
-local TeleportService = game:GetService("TeleportService")
+local TeleportService = game:GetService("TeleportService") 
 local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
 
@@ -171,7 +172,7 @@ local ByteNet = ReplicatedStorage:WaitForChild("ByteNetReliable")
 local RemotesModule = require(ReplicatedStorage.Database.Security.Remotes)
 local VoteKickRemotes = RemotesModule.VoteKick
 
-print("--- CT (WINNER) ZERO-LOOP FARM + HOPPER + SMART REJOIN ---")
+print("--- TERRORIST (LOSER) ZERO-LOOP FARM STARTED ---")
 
 -- ============================================================================
 -- 3. VOTEKICK LOGIC (SECURITY)
@@ -266,13 +267,13 @@ task.spawn(function()
 end)
 
 -- ============================================================================
--- 4. FARM LOGIC
+-- 4. FARM LOGIC (LOSER - RESET ENABLED)
 -- ============================================================================
 
 local function TryJoinTeam()
     task.spawn(function()
         for i = 1, 10 do 
-            if LocalPlayer.Team and LocalPlayer.Team.Name == "Counter-Terrorists" then break end
+            if LocalPlayer.Team and LocalPlayer.Team.Name == "Terrorists" then break end
             local args = { buffer.fromstring(TEAM_STRING), nil }
             ByteNet:FireServer(unpack(args))
             task.wait(1)
@@ -280,17 +281,32 @@ local function TryJoinTeam()
     end)
 end
 
+local function TryKill()
+    local char = LocalPlayer.Character
+    if char and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 then
+        local args = { buffer.fromstring(RESET_STRING), nil }
+        ByteNet:FireServer(unpack(args))
+    end
+end
+
 local function OnStateChanged()
     local state = Workspace:GetAttribute("GameState")
+    
     if state == "Intermission" or state == "Warmup" then
         TryJoinTeam()
+    elseif state == "Round In Progress" then
+        -- Don't kill if we are busy kicking a stranger
+        if getgenv().PauseFarm then return end 
+        TryKill()
     end
 end
 local stateConn = Workspace:GetAttributeChangedSignal("GameState"):Connect(OnStateChanged)
 table.insert(getgenv().FarmConnections, stateConn)
 
 local function DestroyMap(child)
-    if child.Name == "Map" then task.delay(0.1, function() if child then child:Destroy() end end) end
+    if child.Name == "Map" then
+        task.delay(0.1, function() if child then child:Destroy() end end)
+    end
 end
 local mapConn = Workspace.ChildAdded:Connect(DestroyMap)
 table.insert(getgenv().FarmConnections, mapConn)
@@ -307,6 +323,10 @@ local function handleCharacter(char)
             root.Velocity = Vector3.new(0,0,0)
         end
     end)
+    -- Mid-Game Kill Check
+    if Workspace:GetAttribute("GameState") == "Round In Progress" then
+        task.wait(0.5); TryKill()
+    end
 end
 local charConn = LocalPlayer.CharacterAdded:Connect(handleCharacter)
 table.insert(getgenv().FarmConnections, charConn)
@@ -525,4 +545,8 @@ table.insert(getgenv().FarmConnections, rejoinConn)
 local currentState = Workspace:GetAttribute("GameState")
 if currentState == "Intermission" or currentState == "Warmup" then
     TryJoinTeam()
+elseif currentState == "Round In Progress" then
+    TryJoinTeam()
+    task.wait(1)
+    TryKill()
 end
