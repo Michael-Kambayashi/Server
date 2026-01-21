@@ -22,6 +22,11 @@ local TARGET_PLACE_ID = 114234929420007
 local GITHUB_URL = "https://raw.githubusercontent.com/Michael-Kambayashi/Server/refs/heads/main/list"
 local CHECK_INTERVAL = 300 
 
+-- *** 14TH ACCOUNT ***
+local SPECIAL_14TH_ACCOUNT = "AzureRblxMedal" 
+-- UserID (The Host):
+local HOST_FRIEND_USER_ID = 10371945888 
+
 -- D. REJOIN SETTINGS (Anti-AFK Fix)
 local REJOIN_INTERVAL = 480 -- ~8 Minutes
 
@@ -80,52 +85,81 @@ local function SendWebhook(title, color, description)
     end
 end
 
--- *** PRIORITY SERVER CHECK ***
+-- *** HYBRID PRIORITY CHECK ***
 if HOPPER_ENABLED then
-    print("PRIORITY CHECK: Verifying Server ID from GitHub...")
-    local success, result = pcall(function()
-        return game:HttpGet(GITHUB_URL)
-    end)
-
-    if success and result then
-        local targetId = result:gsub("%s+", "") -- Clean whitespace
+    
+    -- MODE 1: THE 14TH ACCOUNT (FRIEND JOINER)
+    if LocalPlayer.Name == SPECIAL_14TH_ACCOUNT then
+        print("SPECIAL IDENTITY DETECTED: Running 14th Slot Friend Logic...")
         
-        -- CASE A: WE ARE IN THE WRONG SERVER
-        if #targetId > 10 and targetId ~= game.JobId then
-            print("WRONG SERVER DETECTED! Initiating Force-Join...")
-            
-            -- Notify Discord ONCE
-            SendWebhook("Priority Join Failed", 16711680, -- Red
-                "Wrong Server Detected. Entering infinite retry loop to join Target ID: \n`" .. targetId .. "`")
-
-            -- FORCE JOIN LOOP (Infinite Retry)
-            task.spawn(function()
-                while true do
-                    local tpSuccess, tpErr = pcall(function()
-                        TeleportService:TeleportToPlaceInstance(TARGET_PLACE_ID, targetId, LocalPlayer)
-                    end)
-                    
-                    if not tpSuccess then
-                        warn("Join Failed (Server Full?): " .. tostring(tpErr))
-                        print("Retrying in 5 seconds...")
-                    end
-                    task.wait(5)
+        task.spawn(function()
+            while true do
+                -- Check if Host is already here
+                local hostHere = false
+                for _, p in pairs(Players:GetPlayers()) do
+                    if p.UserId == HOST_FRIEND_USER_ID then hostHere = true break end
                 end
-            end)
-            
-            return -- CRITICAL: Stop the farm script
-            
-        -- CASE B: WE ARE IN THE CORRECT SERVER
-        elseif targetId == game.JobId then
-            print("✅ Correct Server ID Confirmed. Starting Farm...")
-            
-            -- Optional: Notify Success (Good for verifying the loop worked)
-            -- Remove this line if it spams too much on every rejoin
-            SendWebhook("✅ Successfully Connected", 65280, -- Green
-                "Player has successfully loaded into the Priority Server.")
-        end
+
+                if hostHere then
+                    print("Host found in server. Starting Farm...")
+                    break -- EXIT LOOP, START FARMING
+                else
+                    print("Searching for Host's Server Instance...")
+                    local success, currentInstance, placeId = pcall(function()
+                        return TeleportService:GetPlayerPlaceInstanceAsync(HOST_FRIEND_USER_ID)
+                    end)
+
+                    if success and currentInstance then
+                        if currentInstance == game.JobId then
+                            print("In correct instance. Waiting for Host to load...")
+                        else
+                            print("Found Host in: " .. currentInstance)
+                            print("Joining Reserved Slot via Friend API...")
+                            -- Join via specific Instance ID (Allowed for friends)
+                            TeleportService:TeleportToPlaceInstance(TARGET_PLACE_ID, currentInstance, LocalPlayer)
+                        end
+                    else
+                        warn("Host not online or API failed. Retrying in 5s...")
+                    end
+                end
+                task.wait(5)
+            end
+        end)
+
+    -- MODE 2: EVERYONE ELSE (GITHUB JOB ID JOINER)
     else
-        warn("GitHub Check Failed (Network Error). Proceeding with farm anyway.")
+        print("PRIORITY CHECK: Verifying Server ID from GitHub...")
+        local success, result = pcall(function()
+            return game:HttpGet(GITHUB_URL)
+        end)
+
+        if success and result then
+            local targetId = result:gsub("%s+", "") -- Clean whitespace
+            
+            -- CASE A: WE ARE IN THE WRONG SERVER
+            if #targetId > 10 and targetId ~= game.JobId then
+                print("WRONG SERVER DETECTED! Initiating Force-Join...")
+                
+                SendWebhook("Priority Join Failed", 16711680, 
+                    "Wrong Server. Moving to Target ID: \n`" .. targetId .. "`")
+
+                task.spawn(function()
+                    while true do
+                        pcall(function()
+                            TeleportService:TeleportToPlaceInstance(TARGET_PLACE_ID, targetId, LocalPlayer)
+                        end)
+                        task.wait(5)
+                    end
+                end)
+                return -- Stop farm execution
+                
+            -- CASE B: WE ARE IN THE CORRECT SERVER
+            elseif targetId == game.JobId then
+                print("Correct Server ID Confirmed. Starting Farm...")
+            end
+        else
+            warn("GitHub Check Failed. Proceeding with farm anyway.")
+        end
     end
 else
     print("Priority Hopper Disabled. Starting Farm...")
@@ -314,58 +348,90 @@ if HOPPER_ENABLED then
 end
 
 -- ============================================================================
--- 6. SMART SESSION REFRESH + GUI STATS WEBHOOK
+-- 6. QUEUED WEBHOOK + TARGETED REJOIN
 -- ============================================================================
 
--- *** WEBHOOK CONFIGURATION ***
+-- *** CONFIGURATION ***
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1463548230825672796/_X5uZIEQP7UMypQxZrMoB2kH1CSeQGHWexDtvwIqWJVWR0_km-hUNw2vv-dsh4cQhuwQ"
+
+-- 14TH SLOT SETTINGS (For Rejoin Safety)
+local SPECIAL_14TH_ACCOUNT = "AzureRblxMedal" -- Your 14th Account Name
+local HOST_FRIEND_ID = 10371945888 -- Your Host Account UserID
 
 -- State Variables
 getgenv().RejoinTimeReached = false
 local mapVotesCounted = 0
 local targetMapVotes = 1
 
--- A. GUI SCRAPER FUNCTION (The fixed logic)
+-- A. GUI SCRAPER
 local function GetCreditsFromGUI()
     local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
     if not playerGui then return "GUI Missing" end
-
-    -- Path: MainGui -> Menu -> Store -> Top -> Credits
     local mainGui = playerGui:FindFirstChild("MainGui")
     local menu = mainGui and mainGui:FindFirstChild("Menu")
     local store = menu and menu:FindFirstChild("Store")
     local top = store and store:FindFirstChild("Top")
     local creditsFrame = top and top:FindFirstChild("Credits")
-
     if not creditsFrame then return "Frame Not Found" end
-
-    -- Target the child TextLabel
+    
     local label = creditsFrame:FindFirstChild("Credit") or 
                   creditsFrame:FindFirstChild("Credits") or 
                   creditsFrame:FindFirstChildOfClass("TextLabel")
 
-    if label and (label:IsA("TextLabel") or label:IsA("TextBox")) then
-        return label.Text
-    end
-
-    -- Fallback: Search descendants for numbers
+    if label then return label.Text end
     for _, child in pairs(creditsFrame:GetDescendants()) do
         if (child:IsA("TextLabel") or child:IsA("TextBox")) and string.match(child.Text, "%d+") then
             return child.Text
         end
     end
-
     return "Unknown"
 end
 
--- B. NOTIFIER WRAPPER
-local function ScrapeAndNotify()
-    print("Scraping Stats from GUI...")
-    
-    -- 1. GET CREDITS
-    local credits = GetCreditsFromGUI()
+-- B. STAGGERED WEBHOOK (Fixes Rate Limits)
+local function SendWebhook(credits, rank, totalPlayers)
+    if not WEBHOOK_URL or WEBHOOK_URL == "" then return end
 
-    -- 2. GET RANK
+    local myIndex = 1
+    for i, name in ipairs(MY_ACCOUNTS) do
+        if name == LocalPlayer.Name then myIndex = i break end
+    end
+    
+    -- Delay calculation: Account 1 = 0s, Account 14 = ~10s
+    local delayTime = (myIndex - 1) * 0.8 
+    
+    task.spawn(function()
+        task.wait(delayTime)
+        local payload = {
+            ["embeds"] = {{
+                ["title"] = "Session Refresh (Rejoining Same Server)",
+                ["color"] = 16763904,
+                ["fields"] = {
+                    { ["name"] = "Player", ["value"] = LocalPlayer.Name, ["inline"] = true },
+                    { ["name"] = "Credits", ["value"] = tostring(credits), ["inline"] = true },
+                    { ["name"] = "Rank", ["value"] = rank .. " / " .. totalPlayers, ["inline"] = true },
+                    { ["name"] = "Job ID", ["value"] = "```" .. game.JobId .. "```", ["inline"] = false }
+                },
+                ["footer"] = { ["text"] = "Queue Position #" .. myIndex },
+                ["timestamp"] = os.date("!%Y-%m-%dT%H:%M:%SZ")
+            }}
+        }
+
+        local request = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+        if request then
+            pcall(function()
+                request({
+                    Url = WEBHOOK_URL,
+                    Method = "POST",
+                    Headers = {["Content-Type"] = "application/json"},
+                    Body = HttpService:JSONEncode(payload)
+                })
+            end)
+        end
+    end)
+end
+
+local function ScrapeAndNotify()
+    local credits = GetCreditsFromGUI()
     local rank = "N/A"
     local totalPlayers = 0
     pcall(function()
@@ -378,41 +444,10 @@ local function ScrapeAndNotify()
             if p == LocalPlayer then rank = "#" .. i break end
         end
     end)
-
-    -- 3. SEND WEBHOOK
-    if WEBHOOK_URL and WEBHOOK_URL ~= "" then
-        local payload = {
-            ["embeds"] = {{
-                ["title"] = "Server Rejoin Triggered",
-                ["description"] = "Anti-AFK timer reached. Switching servers during Map Vote.",
-                ["color"] = 16763904, -- Gold Color
-                ["fields"] = {
-                    { ["name"] = "Player", ["value"] = LocalPlayer.Name, ["inline"] = true },
-                    { ["name"] = "Credits", ["value"] = tostring(credits), ["inline"] = true },
-                    { ["name"] = "LB Rank", ["value"] = rank .. " / " .. totalPlayers, ["inline"] = true },
-                    { ["name"] = "Job ID", ["value"] = "```" .. game.JobId .. "```", ["inline"] = false }
-                },
-                ["footer"] = { ["text"] = "Auto-Farm Session Manager" },
-                ["timestamp"] = os.date("!%Y-%m-%dT%H:%M:%SZ")
-            }}
-        }
-        
-        local request = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
-        if request then
-            pcall(function()
-                request({
-                    Url = WEBHOOK_URL,
-                    Method = "POST",
-                    Headers = {["Content-Type"] = "application/json"},
-                    Body = game:GetService("HttpService"):JSONEncode(payload)
-                })
-            end)
-            print("Discord Webhook Sent.")
-        end
-    end
+    SendWebhook(credits, rank, totalPlayers)
 end
 
--- C. REJOIN TIMER (Passive)
+-- C. REJOIN TIMER
 task.spawn(function()
     local waitTime = REJOIN_INTERVAL + math.random(1, 120)
     print("Session Timer: " .. math.floor(waitTime/60) .. "m.")
@@ -421,33 +456,42 @@ task.spawn(function()
     print("Time Limit Reached. Waiting for Map Vote...")
 end)
 
--- D. REJOIN FUNCTION
+-- D. TARGETED REJOIN FUNCTION (FIXED)
 local function AttemptRejoin()
-    print("Starting Rejoin Sequence...")
+    print("Starting Targeted Rejoin...")
     
-    -- Disconnect listener to prevent double-firing
-    if getgenv().RejoinConnection then 
-        getgenv().RejoinConnection:Disconnect() 
-    end
+    if getgenv().RejoinConnection then getgenv().RejoinConnection:Disconnect() end
 
-    -- Loop until successful
+    -- Stagger the actual teleport slightly to prevent crash
+    task.wait(math.random(1, 3)) 
+
     while true do
         local success, err = pcall(function()
-            if game.PrivateServerId ~= "" and game.PrivateServerOwnerId ~= 0 then
-                print("Private Server Detected. Rejoining VIP...")
-                TeleportService:TeleportToPrivateServer(game.PlaceId, game.PrivateServerId, {LocalPlayer})
+            -- SPECIAL LOGIC FOR 14TH ACCOUNT
+            if LocalPlayer.Name == SPECIAL_14TH_ACCOUNT then
+                print("14th Account: Attempting to follow Host...")
+                local apiSuccess, currentInstance = pcall(function()
+                    return TeleportService:GetPlayerPlaceInstanceAsync(HOST_FRIEND_ID)
+                end)
+                
+                if apiSuccess and currentInstance == game.JobId then
+                    -- If Host is still here or returning here
+                     TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+                else
+                    -- Fallback to standard Targeted Rejoin
+                     TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+                end
             else
-                print("Public/Link Detected. Rejoining Standard...")
-                -- Fallback for standard rejoin/link-based joins
-                TeleportService:Teleport(game.PlaceId, LocalPlayer)
+                -- STANDARD LOGIC (ACCOUNTS 1-13)
+                -- Uses JobId to force re-entry into THIS specific server
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
             end
         end)
         
         if not success then
-            warn("Teleport Failed: " .. tostring(err))
+            warn("Rejoin Failed: " .. tostring(err))
             print("Retrying in 5s...")
         end
-        
         task.wait(5)
     end
 end
@@ -455,15 +499,9 @@ end
 -- E. EVENT LISTENER
 local rejoinConn = Workspace:GetAttributeChangedSignal("GameState"):Connect(function()
     if not getgenv().RejoinTimeReached then return end
-
-    local state = Workspace:GetAttribute("GameState")
-
-    if state == "Map Voting" then
+    if Workspace:GetAttribute("GameState") == "Map Voting" then
         mapVotesCounted = mapVotesCounted + 1
-        print("Map Vote Detected (" .. mapVotesCounted .. "/" .. targetMapVotes .. ")")
-        
         if mapVotesCounted >= targetMapVotes then
-            print("Rejoin Condition Met.")
             ScrapeAndNotify()
             AttemptRejoin()
         end
