@@ -114,7 +114,7 @@ local function SendWebhook(title, description, color)
 end
 
 -- ============================================================================
--- 3. HOPPER & SELF-DEFENSE
+-- 3. HOPPER & SELF-DEFENSE (LATE-JOINER LEAVES VERSION)
 -- ============================================================================
 
 -- RANDOMIZED HOPPER
@@ -153,7 +153,7 @@ end
 -- EMERGENCY HOP
 local function EmergencyHop(reason)
     print("🚨 EMERGENCY HOP! Reason: " .. reason)
-    SendWebhook("🚨 Emergency Evacuation", "Trigger: **" .. reason .. "**\nTeleporting to random server...", 16711680) -- Red
+    SendWebhook("🚨 Emergency Evacuation", "Trigger: **" .. reason .. "**\nTeleporting to random server...", 16711680)
     
     if syn and syn.queue_on_teleport then
         syn.queue_on_teleport([[game:GetService("TeleportService"):Teleport(game.PlaceId)]])
@@ -161,7 +161,7 @@ local function EmergencyHop(reason)
     TeleportService:Teleport(game.PlaceId, LocalPlayer)
 end
 
--- COLLISION CHECK
+-- COLLISION CHECK HELPER
 local function IsStranger(player)
     for _, name in pairs(MY_ACCOUNTS) do
         if player.Name == name then return false end
@@ -169,20 +169,30 @@ local function IsStranger(player)
     return true
 end
 
+-- [STEP 1] INITIAL CHECK: If I join and see a friend, I LEAVE.
 local collisionDetected = false
 for _, p in pairs(Players:GetPlayers()) do
     if p ~= LocalPlayer and not IsStranger(p) then
-        print("⚠️ COLLISION: " .. p.Name)
+        print("⚠️ INITIAL COLLISION: Friend " .. p.Name .. " is already here. Hopping...")
         collisionDetected = true
         break
     end
 end
 
 if collisionDetected then 
-    SendWebhook("⚠️ Collision Detected", "Found whitelisted account. Hopping...", 16776960) -- Yellow
+    SendWebhook("⚠️ Initial Collision", "I joined a server where a friend was already farming. Hopping...", 16776960)
     ServerHop() 
     return 
 end
+
+-- [STEP 2] SAFETY CHECK: If a friend joins ME, I STAY (They will leave).
+local safetyConn = Players.PlayerAdded:Connect(function(player)
+    if not IsStranger(player) then
+        print("👤 Whitelisted friend (" .. player.Name .. ") joined.")
+        print("✅ I was here first. Staying put while they handle their own hop.")
+    end
+end)
+table.insert(getgenv().FarmConnections, safetyConn)
 
 -- VOTEKICK EVASION
 VoteKickRemotes.StartVote.Listen(function(data)
