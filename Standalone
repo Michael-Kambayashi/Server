@@ -275,31 +275,42 @@ if HOPPER_ENABLED then
 end
 
 -- ============================================================================
--- 6. SMART SESSION REFRESH (ANTI-AFK FIX)
+-- 6. SMART SESSION REFRESH (DELAYED REJOIN)
 -- ============================================================================
-
 task.spawn(function()
-    -- 1. Wait ~13 Minutes (Randomized to prevent mass disconnect)
+    -- 1. Initial Wait (~13 Minutes)
     local waitTime = REFRESH_TIME + math.random(1, 120)
-    print("Session Refresh in " .. math.floor(waitTime/60) .. " minutes.")
+    print("Session Refresh Timer started: " .. math.floor(waitTime/60) .. " minutes.")
     task.wait(waitTime)
     
-    print("Timer Reached. Waiting for Intermission to Refresh...")
+    print("Timer Reached. Waiting for 3rd 'Map Voting' or 'Game Ending' event...")
     
-    -- 2. Wait for Safe Moment (Intermission/Warmup)
-    -- We try to wait up to 2 minutes for the round to end.
-    local maxWait = 120 
-    while maxWait > 0 do
+    -- 2. Counter Logic
+    local eventCount = 0
+    local targetCount = 3
+    
+    while eventCount < targetCount do
+        -- Wait for the next state change
+        Workspace:GetAttributeChangedSignal("GameState"):Wait()
         local state = Workspace:GetAttribute("GameState")
-        if state == "Intermission" or state == "Warmup" or state == "Map Voting" then
-            break -- Safe to leave
+        
+        -- Check if valid state
+        if state == "Map Voting" or state == "Game Ending" then
+            eventCount = eventCount + 1
+            print("Refresh Opportunity Detected (" .. eventCount .. "/" .. targetCount .. "): " .. state)
+            
+            -- If we hit the 3rd event, break the loop to rejoin
+            if eventCount >= targetCount then
+                break
+            end
+            
+            -- Wait 5 seconds to ensure we don't double-count flickering states
+            task.wait(5)
         end
-        task.wait(1)
-        maxWait = maxWait - 1
     end
     
     -- 3. Rejoin Same Server
-    print("Refreshing Session...")
+    print("Limit Reached. Refreshing Session Now...")
     TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
 end)
 
