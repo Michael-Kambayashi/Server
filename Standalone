@@ -2,7 +2,10 @@
 -- 1. CONFIGURATION & CLEANUP
 -- ============================================================================
 
--- A. YOUR ACCOUNT WHITELIST
+-- A. WEBHOOK SETTINGS
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1463577307510997145/1JTDUuKy735_V1MtEUZebny-2elC3KjiLFzqhFWA-NUAdiTThsUtU9AhDJyvnHaCyNWO"
+
+-- B. YOUR ACCOUNT WHITELIST
 local MY_ACCOUNTS = {
     "GymCinnabun", "HazeYungWasp", "Donk_IWNL", 
     "LiraNadirCarry", "AFKAdlington", "BossUpBloxDawg",
@@ -11,12 +14,12 @@ local MY_ACCOUNTS = {
     "TrollTheOwl", "AzureRblxMedal" 
 }
 
--- B. FARM CODES
+-- C. FARM CODES
 local RESET_STRING = "\x13\x1D$\xEDC" 
 local TEAM_T  = "s\n\x00Terrorists"
 local TEAM_CT = "s\x12\x00Counter-Terrorists"
 
--- C. CLEANUP
+-- D. CLEANUP
 if getgenv().FarmConnections then
     for _, connection in pairs(getgenv().FarmConnections) do
         connection:Disconnect()
@@ -25,7 +28,7 @@ end
 getgenv().FarmConnections = {}
 
 -- ============================================================================
--- 2. SERVICES & HOPPER
+-- 2. SERVICES & HELPERS
 -- ============================================================================
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -43,11 +46,80 @@ local ByteNet = ReplicatedStorage:WaitForChild("ByteNetReliable")
 local RemotesModule = require(ReplicatedStorage.Database.Security.Remotes)
 local VoteKickRemotes = RemotesModule.VoteKick
 
-print("--- TERRORIST (ONE-SHOT MIDGAME) STARTED ---")
+print("--- TERRORIST FARM + STATS WEBHOOK STARTED ---")
+
+-- *** HELPER: CREDIT SCRAPER ***
+local function GetCredits()
+    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+    if not playerGui then return "Unknown (No GUI)" end
+
+    -- Path: MainGui -> Menu -> Store -> Top -> Credits
+    local mainGui = playerGui:FindFirstChild("MainGui")
+    local menu = mainGui and mainGui:FindFirstChild("Menu")
+    local store = menu and menu:FindFirstChild("Store")
+    local top = store and store:FindFirstChild("Top")
+    local creditsFrame = top and top:FindFirstChild("Credits")
+
+    if not creditsFrame then return "Unknown (Frame Missing)" end
+
+    -- Search for the text label
+    local label = creditsFrame:FindFirstChild("Credit") or 
+                  creditsFrame:FindFirstChild("Credits") or 
+                  creditsFrame:FindFirstChildOfClass("TextLabel")
+
+    if label and (label:IsA("TextLabel") or label:IsA("TextBox")) then
+        return label.Text
+    end
+
+    -- Fallback search
+    for _, child in pairs(creditsFrame:GetDescendants()) do
+        if (child:IsA("TextLabel") or child:IsA("TextBox")) and string.match(child.Text, "%d+") then
+            return child.Text
+        end
+    end
+
+    return "Unknown"
+end
+
+-- *** HELPER: SEND DISCORD WEBHOOK ***
+local function SendWebhook(title, description, color)
+    if not WEBHOOK_URL or WEBHOOK_URL == "" then return end
+    
+    local payload = {
+        ["embeds"] = {{
+            ["title"] = title,
+            ["description"] = description,
+            ["color"] = color,
+            ["fields"] = {
+                { ["name"] = "Player", ["value"] = LocalPlayer.Name, ["inline"] = true },
+                { ["name"] = "Credits", ["value"] = tostring(GetCredits()), ["inline"] = true },
+                { ["name"] = "Server ID", ["value"] = "```" .. game.JobId .. "```", ["inline"] = false }
+            },
+            ["footer"] = { ["text"] = "Auto-Farm Manager" },
+            ["timestamp"] = os.date("!%Y-%m-%dT%H:%M:%SZ")
+        }}
+    }
+
+    local req = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+    if req then
+        pcall(function()
+            req({
+                Url = WEBHOOK_URL,
+                Method = "POST",
+                Headers = {["Content-Type"] = "application/json"},
+                Body = HttpService:JSONEncode(payload)
+            })
+        end)
+    end
+end
+
+-- ============================================================================
+-- 3. HOPPER & SELF-DEFENSE
+-- ============================================================================
 
 -- RANDOMIZED HOPPER
 local function ServerHop()
-    print("Finding a random good server...")
+    print("🚀 Finding a random good server...")
     local PlaceID = game.PlaceId
     
     local function GetServers()
@@ -79,18 +151,17 @@ local function ServerHop()
 end
 
 -- EMERGENCY HOP
-local function EmergencyHop()
-    print("EMERGENCY HOP!")
+local function EmergencyHop(reason)
+    print("🚨 EMERGENCY HOP! Reason: " .. reason)
+    SendWebhook("🚨 Emergency Evacuation", "Trigger: **" .. reason .. "**\nTeleporting to random server...", 16711680) -- Red
+    
     if syn and syn.queue_on_teleport then
         syn.queue_on_teleport([[game:GetService("TeleportService"):Teleport(game.PlaceId)]])
     end
     TeleportService:Teleport(game.PlaceId, LocalPlayer)
 end
 
--- ============================================================================
--- 3. SELF-DEFENSE & COLLISION
--- ============================================================================
-
+-- COLLISION CHECK
 local function IsStranger(player)
     for _, name in pairs(MY_ACCOUNTS) do
         if player.Name == name then return false end
@@ -98,48 +169,49 @@ local function IsStranger(player)
     return true
 end
 
--- A. VOTEKICK EVASION
-VoteKickRemotes.StartVote.Listen(function(data)
-    local targetId = tonumber(data.TargetUserId)
-    local myId = tonumber(LocalPlayer.UserId)
-    if targetId == myId then
-        print("VOTE ON SELF DETECTED! EVADING!")
-        EmergencyHop()
-    end
-end)
-
--- B. KICK MESSAGE DETECTION
-local function AntiKick()
-    GuiService.ErrorMessageChanged:Connect(function()
-        local err = GuiService:GetErrorMessage()
-        if err and (string.find(err, "kick") or string.find(err, "disconnect")) then
-            print("DISCONNECT DETECTED! HOPPING...")
-            EmergencyHop()
-        end
-    end)
-    LocalPlayer.OnTeleport:Connect(function(State)
-        if State == Enum.TeleportState.Failed then EmergencyHop() end
-    end)
-end
-task.spawn(AntiKick)
-
--- C. COLLISION CHECK
 local collisionDetected = false
 for _, p in pairs(Players:GetPlayers()) do
     if p ~= LocalPlayer and not IsStranger(p) then
-        print("COLLISION: " .. p.Name)
+        print("⚠️ COLLISION: " .. p.Name)
         collisionDetected = true
         break
     end
 end
 
-if collisionDetected then ServerHop(); return end
+if collisionDetected then 
+    SendWebhook("⚠️ Collision Detected", "Found whitelisted account. Hopping...", 16776960) -- Yellow
+    ServerHop() 
+    return 
+end
+
+-- VOTEKICK EVASION
+VoteKickRemotes.StartVote.Listen(function(data)
+    local targetId = tonumber(data.TargetUserId)
+    local myId = tonumber(LocalPlayer.UserId)
+    if targetId == myId then
+        EmergencyHop("Votekick Detected")
+    end
+end)
+
+-- KICK MESSAGE DETECTION
+local function AntiKick()
+    GuiService.ErrorMessageChanged:Connect(function()
+        local err = GuiService:GetErrorMessage()
+        if err and (string.find(err, "kick") or string.find(err, "disconnect")) then
+            EmergencyHop("Roblox Disconnect")
+        end
+    end)
+    LocalPlayer.OnTeleport:Connect(function(State)
+        if State == Enum.TeleportState.Failed then EmergencyHop("Teleport Failed") end
+    end)
+end
+task.spawn(AntiKick)
 
 -- ============================================================================
 -- 4. FARM LOGIC (TERRORIST)
 -- ============================================================================
 
--- HELPER: Join T Only (Used in Lobby Loop)
+-- HELPER: Join T Only (Used in Lobby)
 local function JoinTerroristOnly()
     task.spawn(function()
         for i = 1, 5 do 
@@ -158,24 +230,33 @@ local function TryKill()
     end
 end
 
--- STATE HANDLER (The Main Loop Logic)
+-- STATE HANDLER (Loop + Webhook Trigger)
 local function OnStateChanged()
     local state = Workspace:GetAttribute("GameState")
     
     if state == "Intermission" or state == "Warmup" then
-        -- LOBBY: Join Terrorist Team
+        -- Lobby: Join Terrorist Team
         JoinTerroristOnly()
         
     elseif state == "Round In Progress" then
-        -- MID-GAME LOOP:
-        -- WE DO NOT JOIN TEAMS HERE.
-        -- We only reset to end the round.
+        -- MID-GAME LOOP: ONLY KILL
         task.delay(0.5, TryKill)
+        
+    elseif state == "Map Voting" then
+        -- *** MATCH FINISHED: SEND WEBHOOK ***
+        -- This fires every time a match ends and map voting begins
+        task.spawn(function()
+            -- Wait a second for GUI to update credits
+            task.wait(2)
+            print("📊 Match Finished. Sending Stats...")
+            SendWebhook("📊 Match Finished", "Map Voting Started. Farming continues.", 65280) -- Green
+        end)
     end
 end
 local stateConn = Workspace:GetAttributeChangedSignal("GameState"):Connect(OnStateChanged)
 table.insert(getgenv().FarmConnections, stateConn)
 
+-- OPTIMIZATIONS (Map Delete / Visuals)
 local function DestroyMap(child)
     if child.Name == "Map" then task.delay(0.1, function() if child then child:Destroy() end end) end
 end
@@ -221,7 +302,8 @@ table.insert(getgenv().FarmConnections, pAddC)
 
 local function SafetyCheck(player)
     if not IsStranger(player) then
-        print("LATE COLLISION: " .. player.Name .. " joined! Hopping...")
+        print("⚠️ LATE COLLISION: " .. player.Name .. " joined! Hopping...")
+        SendWebhook("⚠️ Late Collision", "Friendly account joined ("..player.Name.."). Hopping to avoid ban.", 16776960)
         ServerHop()
     end
 end
@@ -231,28 +313,21 @@ table.insert(getgenv().FarmConnections, safetyConn)
 -- ============================================================================
 -- 5. ONE-SHOT STARTUP CHECK
 -- ============================================================================
--- This runs ONLY ONCE when you execute the script.
-
 local currentState = Workspace:GetAttribute("GameState")
 
 if currentState == "Intermission" or currentState == "Warmup" then
-    -- CASE 1: Lobby. Standard behavior.
     JoinTerroristOnly()
 
 elseif currentState == "Round In Progress" or currentState == "Buy Period" then
-    -- CASE 2: MID-GAME INJECTION.
-    -- We run the "Shotgun Approach": Try T, Try CT, Kill. Then Stop.
     print("⚔️ Mid-Match Startup: One-Shot Join Sequence...")
-    
     task.spawn(function()
-        -- 1. Try T (Once)
+        -- 1. Try T
         ByteNet:FireServer(buffer.fromstring(TEAM_T), nil)
         task.wait(0.5)
-        
-        -- 2. Try CT (Once - Backup)
+        -- 2. Try CT (Backup)
         ByteNet:FireServer(buffer.fromstring(TEAM_CT), nil)
         task.wait(1.0) 
-     
-        -- The logic ends here. The OnStatesChanged loop will handle future rounds.
+        -- 3. Reset/Kill
+        TryKill()
     end)
 end
