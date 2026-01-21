@@ -275,42 +275,46 @@ if HOPPER_ENABLED then
 end
 
 -- ============================================================================
--- 6. SMART SESSION REFRESH (DELAYED REJOIN)
+-- 6. SMART SESSION REFRESH (STRICT 2-MAP DELAY)
 -- ============================================================================
 task.spawn(function()
     -- 1. Initial Wait (~13 Minutes)
+    -- The script sleeps here. It ignores everything until this time is up.
     local waitTime = REFRESH_TIME + math.random(1, 120)
     print("Session Refresh Timer started: " .. math.floor(waitTime/60) .. " minutes.")
     task.wait(waitTime)
     
-    print("Timer Reached. Waiting for 3rd 'Map Voting' or 'Game Ending' event...")
+    print("Timer Reached. Waiting for the 2nd 'Map Voting' session...")
     
-    -- 2. Counter Logic
-    local eventCount = 0
-    local targetCount = 3
+    -- 2. Strict Counter Logic
+    local mapVoteCount = 0
+    local targetCount = 2 -- We want to see Map Voting twice before leaving
     
-    while eventCount < targetCount do
-        -- Wait for the next state change
+    while mapVoteCount < targetCount do
+        -- Wait specifically for the state to CHANGE
         Workspace:GetAttributeChangedSignal("GameState"):Wait()
         local state = Workspace:GetAttribute("GameState")
         
-        -- Check if valid state
-        if state == "Map Voting" or state == "Game Ending" then
-            eventCount = eventCount + 1
-            print("Refresh Opportunity Detected (" .. eventCount .. "/" .. targetCount .. "): " .. state)
+        -- Only count "Map Voting". Ignore "Game Ending" to prevent double counts.
+        if state == "Map Voting" then
+            mapVoteCount = mapVoteCount + 1
+            print("Map Voting detected (" .. mapVoteCount .. "/" .. targetCount .. ")")
             
-            -- If we hit the 3rd event, break the loop to rejoin
-            if eventCount >= targetCount then
-                break
+            if mapVoteCount >= targetCount then
+                break -- We hit the 2nd time, time to leave.
             end
             
-            -- Wait 5 seconds to ensure we don't double-count flickering states
-            task.wait(5)
+            -- IMPORTANT: Wait until this specific Map Voting session IS OVER.
+            -- This prevents the script from counting the same session multiple times.
+            while Workspace:GetAttribute("GameState") == "Map Voting" do
+                task.wait(1)
+            end
+            print("   > Map Voting finished. Waiting for next match...")
         end
     end
     
     -- 3. Rejoin Same Server
-    print("Limit Reached. Refreshing Session Now...")
+    print("2nd Map Voting hit. Refreshing Session Now...")
     TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
 end)
 
