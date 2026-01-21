@@ -97,7 +97,7 @@ local ByteNet = ReplicatedStorage:WaitForChild("ByteNetReliable")
 local RemotesModule = require(ReplicatedStorage.Database.Security.Remotes)
 local VoteKickRemotes = RemotesModule.VoteKick
 
-print("--- CT (WINNER) ZERO-LOOP FARM + HOPPER + SMART REJOIN ---")
+print("--- TERRORIST (LOSER) ZERO-LOOP FARM STARTED ---")
 
 -- ============================================================================
 -- 3. VOTEKICK LOGIC (SECURITY)
