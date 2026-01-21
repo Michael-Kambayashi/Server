@@ -53,7 +53,7 @@ local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
 
 -- *** WEBHOOK SETUP ***
-local WEBHOOK_URL = "https://discord.com/api/webhooks/1463548230825672796/_X5uZIEQP7UMypQxZrMoB2kH1CSeQGHWexDtvwIqWJVWR0_km-hUNw2vv-dsh4cQhuwQ"
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1463650584702877756/CfEJwfuv9ar_YFAgooRCYpOdP21gV7yTxRr0hoNjycDoeh49AEbAzjtBdbb4TpH905VC"
 
 local function SendWebhook(title, color, description)
     if not WEBHOOK_URL or WEBHOOK_URL == "" then return end
@@ -352,7 +352,7 @@ end
 -- ============================================================================
 
 -- *** CONFIGURATION ***
-local WEBHOOK_URL = "https://discord.com/api/webhooks/1463548230825672796/_X5uZIEQP7UMypQxZrMoB2kH1CSeQGHWexDtvwIqWJVWR0_km-hUNw2vv-dsh4cQhuwQ"
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1463548242481516688/akhJrKIKcAAtw8mzBoU8COicEbKepypjvBaK1bb3dM1iLEdgQGVYtioKLewoxp7wU6E4"
 
 -- 14TH SLOT SETTINGS (For Rejoin Safety)
 local SPECIAL_14TH_ACCOUNT = "AzureRblxMedal" -- Your 14th Account Name
