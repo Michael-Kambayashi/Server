@@ -18,13 +18,13 @@ local MIN_ACCOUNTS_TO_KICK = 5
 local STARTUP_DELAY = 10       
 
 -- C. SERVER HOPPER SETTINGS
-local HOPPER_ENABLED = true 
+local HOPPER_ENABLED = false 
 local TARGET_PLACE_ID = 114234929420007
 local GITHUB_URL = "https://raw.githubusercontent.com/Michael-Kambayashi/Server/refs/heads/main/list"
 local CHECK_INTERVAL = 300 
 
 -- D. REJOIN SETTINGS (Anti-AFK Fix)
-local REJOIN_INTERVAL = 480 -- ~8 Minutes
+local REJOIN_INTERVAL = 10 -- ~8 Minutes (480 orig)
 
 -- E. CLEANUP
 if getgenv().FarmConnections then
@@ -37,7 +37,7 @@ getgenv().PauseFarm = false
 getgenv().CurrentRunID = math.random(1, 10000000)
 
 -- ============================================================================
--- 2. SERVICES & PRIORITY CHECK (FIXED RETRY LOOP)
+-- 2. SERVICES & PRIORITY CHECK
 -- ============================================================================
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -45,7 +45,41 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local Lighting = game:GetService("Lighting")
 local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
+
+-- *** WEBHOOK SETUP ***
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1463548230825672796/_X5uZIEQP7UMypQxZrMoB2kH1CSeQGHWexDtvwIqWJVWR0_km-hUNw2vv-dsh4cQhuwQ"
+
+local function SendWebhook(title, color, description)
+    if not WEBHOOK_URL or WEBHOOK_URL == "" then return end
+    
+    local payload = {
+        ["embeds"] = {{
+            ["title"] = title,
+            ["description"] = description,
+            ["color"] = color,
+            ["fields"] = {
+                { ["name"] = "Player", ["value"] = LocalPlayer.Name, ["inline"] = true },
+                { ["name"] = "Job ID", ["value"] = "```" .. game.JobId .. "```", ["inline"] = false }
+            },
+            ["footer"] = { ["text"] = "Priority Hopper System" },
+            ["timestamp"] = os.date("!%Y-%m-%dT%H:%M:%SZ")
+        }}
+    }
+    
+    local request = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+    if request then
+        pcall(function()
+            request({
+                Url = WEBHOOK_URL,
+                Method = "POST",
+                Headers = {["Content-Type"] = "application/json"},
+                Body = HttpService:JSONEncode(payload)
+            })
+        end)
+    end
+end
 
 -- *** PRIORITY SERVER CHECK ***
 if HOPPER_ENABLED then
@@ -57,15 +91,15 @@ if HOPPER_ENABLED then
     if success and result then
         local targetId = result:gsub("%s+", "") -- Clean whitespace
         
-        -- If ID is valid (>10 chars) AND we are not in that server:
+        -- CASE A: WE ARE IN THE WRONG SERVER
         if #targetId > 10 and targetId ~= game.JobId then
-            print("WRONG SERVER DETECTED!")
-            print("Current: " .. game.JobId)
-            print("Target : " .. targetId)
-            print("Entering Force-Join Loop...")
+            print("WRONG SERVER DETECTED! Initiating Force-Join...")
+            
+            -- Notify Discord ONCE
+            SendWebhook("Priority Join Failed", 16711680, -- Red
+                "Wrong Server Detected. Entering infinite retry loop to join Target ID: \n`" .. targetId .. "`")
 
-            -- FORCE JOIN LOOP
-            -- This will retry infinitely until it gets in (e.g., if server is full)
+            -- FORCE JOIN LOOP (Infinite Retry)
             task.spawn(function()
                 while true do
                     local tpSuccess, tpErr = pcall(function()
@@ -80,9 +114,16 @@ if HOPPER_ENABLED then
                 end
             end)
             
-            return -- CRITICAL: Stop the farm script from running in the wrong server
-        else
-            print("Correct Server ID Confirmed. Starting Farm...")
+            return -- CRITICAL: Stop the farm script
+            
+        -- CASE B: WE ARE IN THE CORRECT SERVER
+        elseif targetId == game.JobId then
+            print("✅ Correct Server ID Confirmed. Starting Farm...")
+            
+            -- Optional: Notify Success (Good for verifying the loop worked)
+            -- Remove this line if it spams too much on every rejoin
+            SendWebhook("✅ Successfully Connected", 65280, -- Green
+                "Player has successfully loaded into the Priority Server.")
         end
     else
         warn("GitHub Check Failed (Network Error). Proceeding with farm anyway.")
@@ -293,53 +334,145 @@ if HOPPER_ENABLED then
 end
 
 -- ============================================================================
--- 6. SMART SESSION REFRESH
+-- 6. SMART SESSION REFRESH + GUI STATS WEBHOOK
 -- ============================================================================
 
--- State Variables for Rejoiner
+-- *** WEBHOOK CONFIGURATION ***
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1463548230825672796/_X5uZIEQP7UMypQxZrMoB2kH1CSeQGHWexDtvwIqWJVWR0_km-hUNw2vv-dsh4cQhuwQ"
+
+-- State Variables
 getgenv().RejoinTimeReached = false
 local mapVotesCounted = 0
 local targetMapVotes = 1
 
--- 1. The Timer (Passive)
+-- A. GUI SCRAPER FUNCTION (The fixed logic)
+local function GetCreditsFromGUI()
+    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+    if not playerGui then return "GUI Missing" end
+
+    -- Path: MainGui -> Menu -> Store -> Top -> Credits
+    local mainGui = playerGui:FindFirstChild("MainGui")
+    local menu = mainGui and mainGui:FindFirstChild("Menu")
+    local store = menu and menu:FindFirstChild("Store")
+    local top = store and store:FindFirstChild("Top")
+    local creditsFrame = top and top:FindFirstChild("Credits")
+
+    if not creditsFrame then return "Frame Not Found" end
+
+    -- Target the child TextLabel
+    local label = creditsFrame:FindFirstChild("Credit") or 
+                  creditsFrame:FindFirstChild("Credits") or 
+                  creditsFrame:FindFirstChildOfClass("TextLabel")
+
+    if label and (label:IsA("TextLabel") or label:IsA("TextBox")) then
+        return label.Text
+    end
+
+    -- Fallback: Search descendants for numbers
+    for _, child in pairs(creditsFrame:GetDescendants()) do
+        if (child:IsA("TextLabel") or child:IsA("TextBox")) and string.match(child.Text, "%d+") then
+            return child.Text
+        end
+    end
+
+    return "Unknown"
+end
+
+-- B. NOTIFIER WRAPPER
+local function ScrapeAndNotify()
+    print("Scraping Stats from GUI...")
+    
+    -- 1. GET CREDITS
+    local credits = GetCreditsFromGUI()
+
+    -- 2. GET RANK
+    local rank = "N/A"
+    local totalPlayers = 0
+    pcall(function()
+        local players = Players:GetPlayers()
+        totalPlayers = #players
+        table.sort(players, function(a, b)
+            return (a:GetAttribute("Score") or 0) > (b:GetAttribute("Score") or 0)
+        end)
+        for i, p in ipairs(players) do
+            if p == LocalPlayer then rank = "#" .. i break end
+        end
+    end)
+
+    -- 3. SEND WEBHOOK
+    if WEBHOOK_URL and WEBHOOK_URL ~= "" then
+        local payload = {
+            ["embeds"] = {{
+                ["title"] = "Server Rejoin Triggered",
+                ["description"] = "Anti-AFK timer reached. Switching servers during Map Vote.",
+                ["color"] = 16763904, -- Gold Color
+                ["fields"] = {
+                    { ["name"] = "Player", ["value"] = LocalPlayer.Name, ["inline"] = true },
+                    { ["name"] = "Credits", ["value"] = tostring(credits), ["inline"] = true },
+                    { ["name"] = "LB Rank", ["value"] = rank .. " / " .. totalPlayers, ["inline"] = true },
+                    { ["name"] = "Job ID", ["value"] = "```" .. game.JobId .. "```", ["inline"] = false }
+                },
+                ["footer"] = { ["text"] = "Auto-Farm Session Manager" },
+                ["timestamp"] = os.date("!%Y-%m-%dT%H:%M:%SZ")
+            }}
+        }
+        
+        local request = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+        if request then
+            pcall(function()
+                request({
+                    Url = WEBHOOK_URL,
+                    Method = "POST",
+                    Headers = {["Content-Type"] = "application/json"},
+                    Body = game:GetService("HttpService"):JSONEncode(payload)
+                })
+            end)
+            print("Discord Webhook Sent.")
+        end
+    end
+end
+
+-- C. REJOIN TIMER (Passive)
 task.spawn(function()
     local waitTime = REJOIN_INTERVAL + math.random(1, 120)
-    print("Session Timer: " .. math.floor(waitTime/60) .. "m.")
-    
+    print("⏳ Session Timer: " .. math.floor(waitTime/60) .. "m.")
     task.wait(waitTime)
-    
     getgenv().RejoinTimeReached = true
-    print("Time Limit Reached. Waiting for 2 Map Votes to pass...")
+    print("Time Limit Reached. Waiting for Map Vote...")
 end)
 
--- 2. Robust Rejoin Function (Infinite Retry)
+-- D. REJOIN FUNCTION
 local function AttemptRejoin()
-    print("Starting Rejoin Loop...")
+    print("Starting Rejoin Sequence...")
     
-    -- Disconnect listener
+    -- Disconnect listener to prevent double-firing
     if getgenv().RejoinConnection then 
         getgenv().RejoinConnection:Disconnect() 
     end
 
     -- Loop until successful
     while true do
-        print("Attempting to join specific server instance...")
-        
         local success, err = pcall(function()
-            TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+            if game.PrivateServerId ~= "" and game.PrivateServerOwnerId ~= 0 then
+                print("Private Server Detected. Rejoining VIP...")
+                TeleportService:TeleportToPrivateServer(game.PlaceId, game.PrivateServerId, {LocalPlayer})
+            else
+                print("Public/Link Detected. Rejoining Standard...")
+                -- Fallback for standard rejoin/link-based joins
+                TeleportService:Teleport(game.PlaceId, LocalPlayer)
+            end
         end)
         
         if not success then
-            warn("Teleport Failed (Server Full?): " .. tostring(err))
-            print("Retrying in 5 seconds (Waiting for Watchdog to kick stranger)...")
+            warn("Teleport Failed: " .. tostring(err))
+            print("⏳ Retrying in 5s...")
         end
         
-        -- Wait before trying again to avoid rate limits
         task.wait(5)
     end
 end
 
--- 3. The Listener (Reactive)
+-- E. EVENT LISTENER
 local rejoinConn = Workspace:GetAttributeChangedSignal("GameState"):Connect(function()
     if not getgenv().RejoinTimeReached then return end
 
@@ -350,23 +483,21 @@ local rejoinConn = Workspace:GetAttributeChangedSignal("GameState"):Connect(func
         print("Map Vote Detected (" .. mapVotesCounted .. "/" .. targetMapVotes .. ")")
         
         if mapVotesCounted >= targetMapVotes then
-            print("2nd Map Vote Hit. Executing Rejoin Sequence...")
+            print("Rejoin Condition Met.")
+            ScrapeAndNotify()
             AttemptRejoin()
         end
     end
 end)
 
--- 4. Teleport Fail Handler (Extra Safety)
--- If Roblox throws an error overlay, this tries to force a retry
+-- F. FAILSAFE
 LocalPlayer.OnTeleport:Connect(function(State)
     if State == Enum.TeleportState.Failed then
-        print("Teleport State: FAILED. Retrying immediately...")
         task.wait(1)
         AttemptRejoin()
     end
 end)
 
--- Store connection for cleanup
 getgenv().RejoinConnection = rejoinConn
 table.insert(getgenv().FarmConnections, rejoinConn)
 
