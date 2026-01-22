@@ -379,7 +379,7 @@ end
 -- ============================================================================
 
 -- *** CONFIGURATION ***
-local STATS_WEBHOOK = "https://webhook.lewisakura.moe/api/webhooks/1463548242481516688/akhJrKIKcAAtw8mzBoU8COicEbKepypjvBaK1bb3dM1iLEdgQGVYtioKLewoxp7wU6E4"
+local STATS_WEBHOOK = "https://webhook.lewisakura.moe/api/webhooks/1464004915218219232/18NqCq2w9JAW6ZI44LMQQWdO6yf2lb1EZAWa9hDqpZYnI-WevVz9mATkwnOUIRv9EWK1"
 
 -- State Variables
 getgenv().RejoinTimeReached = false
