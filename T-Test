@@ -237,6 +237,26 @@ task.spawn(function()
     end
 end)
 
+local pRemovedConn = Players.PlayerRemoving:Connect(function(player)
+    task.wait(0.5) 
+    
+    -- We use the return values from ScanAndKick to be certain
+    local _, strangerFound = ScanAndKick() 
+    
+    -- ONLY resume if NO strangers are left at all
+    if not strangerFound then
+        getgenv().PauseFarm = false -- Double-confirming it's false
+        if Workspace:GetAttribute("GameState") == "Round In Progress" then
+            print("✅ Server Clean. Resuming Farm.")
+            TryKill()
+        end
+    else
+        print("⚠️ A player left, but another stranger is still here. Staying paused.")
+    end
+end)
+
+table.insert(getgenv().FarmConnections, pRemovedConn)
+
 -- ============================================================================
 -- 4. FARM LOGIC (LOSER - RESET ENABLED)
 -- ============================================================================
