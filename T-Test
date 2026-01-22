@@ -14,19 +14,15 @@ local MY_ACCOUNTS = {
 -- B. SETTINGS
 local RESET_STRING = "\x13\x1D$\xEDC" 
 local TEAM_STRING = "s\n\x00Terrorists"
-local MIN_ACCOUNTS_TO_KICK = 5 
+local MIN_ACCOUNTS_TO_KICK = 7
 local STARTUP_DELAY = 10       
 
 -- C. SERVER HOPPER SETTINGS
-local HOPPER_ENABLED = true 
+local HOPPER_ENABLED = false 
 local TARGET_PLACE_ID = 114234929420007
 local GITHUB_URL = "https://raw.githubusercontent.com/Michael-Kambayashi/Server/refs/heads/main/list"
 local CHECK_INTERVAL = 300 
 
--- *** 14TH ACCOUNT ***
-local SPECIAL_14TH_ACCOUNT = "AzureRblxMedal" 
--- UserID (The Host):
-local HOST_FRIEND_USER_ID = 10371945888 
 
 -- D. REJOIN SETTINGS (Anti-AFK Fix)
 local REJOIN_INTERVAL = 480 -- ~8 Minutes
