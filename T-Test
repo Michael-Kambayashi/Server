@@ -494,8 +494,8 @@ local rejoinConn = Workspace:GetAttributeChangedSignal("GameState"):Connect(func
             -- 1. Send Webhook Stats
             pcall(function() ScrapeAndNotify() end)
             
-            -- 2. Give Webhook 2 seconds to reach Discord before we vanish
-            task.wait(2) 
+            -- 2. Give Webhook 0 seconds to reach Discord before we vanish
+            task.wait(0) 
             
             -- 3. Cleanup connection
             if getgenv().RejoinConnection then 
