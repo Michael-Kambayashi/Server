@@ -383,7 +383,7 @@ end
 -- ============================================================================
 
 -- *** CONFIGURATION ***
-local WEBHOOK_URL = "https://webhook.lewisakura.moe/api/webhooks/1463548242481516688/akhJrKIKcAAtw8mzBoU8COicEbKepypjvBaK1bb3dM1iLEdgQGVYtioKLewoxp7wU6E4"
+local STATS_WEBHOOK = "https://webhook.lewisakura.moe/api/webhooks/1463548242481516688/akhJrKIKcAAtw8mzBoU8COicEbKepypjvBaK1bb3dM1iLEdgQGVYtioKLewoxp7wU6E4"
 
 -- State Variables
 getgenv().RejoinTimeReached = false
@@ -414,14 +414,11 @@ local function GetCreditsFromGUI()
     return "Unknown"
 end
 
--- B. NOTIFIER WRAPPER
+-- B. NOTIFIER WRAPPER (FIXED: SELF-CONTAINED)
 local function ScrapeAndNotify()
     print("Scraping Stats from GUI...")
     
-    -- 1. GET CREDITS
     local credits = GetCreditsFromGUI()
-
-    -- 2. GET RANK
     local rank = "N/A"
     local totalPlayers = 0
     pcall(function()
@@ -435,8 +432,7 @@ local function ScrapeAndNotify()
         end
     end)
 
-    -- 3. SEND WEBHOOK
-    if WEBHOOK_URL and WEBHOOK_URL ~= "" then
+    if STATS_WEBHOOK and STATS_WEBHOOK ~= "" then
         local payload = {
             ["embeds"] = {{
                 ["title"] = "Server Rejoin Triggered",
@@ -457,32 +453,15 @@ local function ScrapeAndNotify()
         if request then
             pcall(function()
                 request({
-                    Url = WEBHOOK_URL,
+                    Url = STATS_WEBHOOK,
                     Method = "POST",
                     Headers = {["Content-Type"] = "application/json"},
-                    Body = game:GetService("HttpService"):JSONEncode(payload)
+                    Body = HttpService:JSONEncode(payload)
                 })
             end)
             print("Discord Webhook Sent.")
         end
     end
-end
-
-local function ScrapeAndNotify()
-    local credits = GetCreditsFromGUI()
-    local rank = "N/A"
-    local totalPlayers = 0
-    pcall(function()
-        local players = Players:GetPlayers()
-        totalPlayers = #players
-        table.sort(players, function(a, b)
-            return (a:GetAttribute("Score") or 0) > (b:GetAttribute("Score") or 0)
-        end)
-        for i, p in ipairs(players) do
-            if p == LocalPlayer then rank = "#" .. i break end
-        end
-    end)
-    SendWebhook(credits, rank, totalPlayers)
 end
 
 -- C. REJOIN TIMER
