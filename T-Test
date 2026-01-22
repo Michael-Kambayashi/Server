@@ -213,12 +213,8 @@ local function ScanAndKick()
             task.spawn(function() InitiateKick(p) end)
         end
     end
-    
-    if strangerFound then
-        getgenv().PauseFarm = true
-    else
-        getgenv().PauseFarm = false
-    end
+
+	task.delay(1, RecalculatePauseState)
 
     return totalPlayers, strangerFound
 end
@@ -236,8 +232,7 @@ table.insert(getgenv().FarmConnections, pAddedConn)
 
 local pRemovingConn = Players.PlayerRemoving:Connect(function(player)
     if IsStranger(player) then
-        task.wait(0.25) -- allow Roblox to update player list
-        RecalculatePauseState()
+        task.delay(0.5, RecalculatePauseState)
     end
 end)
 
