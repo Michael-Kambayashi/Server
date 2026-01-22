@@ -171,16 +171,19 @@ end
 
 -- [STEP 1] INITIAL CHECK: If I join and see a friend, I LEAVE.
 local collisionDetected = false
+local friendFound = ""
+
 for _, p in pairs(Players:GetPlayers()) do
     if p ~= LocalPlayer and not IsStranger(p) then
         print("⚠️ INITIAL COLLISION: Friend " .. p.Name .. " is already here. Hopping...")
+        friendFound = p.Name
         collisionDetected = true
         break
     end
 end
 
 if collisionDetected then 
-    SendWebhook("⚠️ Initial Collision", "I joined a server where a friend was already farming. Hopping...", 16776960)
+    SendWebhook("⚠️ Initial Collision", "I joined a server where a friend (" .. friendFound .. ") was already farming. Hopping...", 16776960)
     ServerHop() 
     return 
 end
@@ -309,16 +312,6 @@ local pAddC = Players.PlayerAdded:Connect(function(player)
     table.insert(getgenv().FarmConnections, conn)
 end)
 table.insert(getgenv().FarmConnections, pAddC)
-
-local function SafetyCheck(player)
-    if not IsStranger(player) then
-        print("⚠️ LATE COLLISION: " .. player.Name .. " joined! Hopping...")
-        SendWebhook("⚠️ Late Collision", "Friendly account joined ("..player.Name.."). Hopping to avoid ban.", 16776960)
-        ServerHop()
-    end
-end
-local safetyConn = Players.PlayerAdded:Connect(SafetyCheck)
-table.insert(getgenv().FarmConnections, safetyConn)
 
 -- ============================================================================
 -- 5. ONE-SHOT STARTUP CHECK
