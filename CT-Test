@@ -329,18 +329,23 @@ local targetMapVotes = 1
 local function GetCreditsFromGUI()
     local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
     if not playerGui then return "GUI Missing" end
+
     local mainGui = playerGui:FindFirstChild("MainGui")
     local menu = mainGui and mainGui:FindFirstChild("Menu")
     local store = menu and menu:FindFirstChild("Store")
     local top = store and store:FindFirstChild("Top")
     local creditsFrame = top and top:FindFirstChild("Credits")
+
     if not creditsFrame then return "Frame Not Found" end
-    
+
     local label = creditsFrame:FindFirstChild("Credit") or 
                   creditsFrame:FindFirstChild("Credits") or 
                   creditsFrame:FindFirstChildOfClass("TextLabel")
 
-    if label then return label.Text end
+    if label and (label:IsA("TextLabel") or label:IsA("TextBox")) then
+        return label.Text
+    end
+
     for _, child in pairs(creditsFrame:GetDescendants()) do
         if (child:IsA("TextLabel") or child:IsA("TextBox")) and string.match(child.Text, "%d+") then
             return child.Text
@@ -349,14 +354,11 @@ local function GetCreditsFromGUI()
     return "Unknown"
 end
 
--- B. NOTIFIER WRAPPER
+-- B. NOTIFIER WRAPPER (Sends Stats via Proxy)
 local function ScrapeAndNotify()
-    print("Scraping Stats from GUI...")
+    print("📊 Scraping Stats from GUI...")
     
-    -- 1. GET CREDITS
     local credits = GetCreditsFromGUI()
-
-    -- 2. GET RANK
     local rank = "N/A"
     local totalPlayers = 0
     pcall(function()
@@ -370,8 +372,7 @@ local function ScrapeAndNotify()
         end
     end)
 
-    -- 3. SEND WEBHOOK
-    if WEBHOOK_URL and WEBHOOK_URL ~= "" then
+    if STATS_WEBHOOK and STATS_WEBHOOK ~= "" then
         local payload = {
             ["embeds"] = {{
                 ["title"] = "Server Rejoin Triggered",
@@ -392,7 +393,7 @@ local function ScrapeAndNotify()
         if request then
             pcall(function()
                 request({
-                    Url = WEBHOOK_URL,
+                    Url = STATS_WEBHOOK,
                     Method = "POST",
                     Headers = {["Content-Type"] = "application/json"},
                     Body = game:GetService("HttpService"):JSONEncode(payload)
