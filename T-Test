@@ -25,7 +25,7 @@ local CHECK_INTERVAL = 300
 
 
 -- D. REJOIN SETTINGS (Anti-AFK Fix)
-local REJOIN_INTERVAL = 480 -- ~8 Minutes
+local REJOIN_INTERVAL = 10 -- ~8 Minutes
 
 -- E. CLEANUP
 if getgenv().FarmConnections then
