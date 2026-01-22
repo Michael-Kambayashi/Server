@@ -279,93 +279,30 @@ table.insert(getgenv().FarmConnections, pRemovingConn)
 
 -- *** STARTUP & WATCHDOG ***
 local myRunID = getgenv().CurrentRunID
-local notificationSent = false
 
--- Function to handle the aggressive kicking loop
-local function ForceKickStrangers(strangers)
-    for _, s in pairs(strangers) do
-        task.spawn(function()
-            -- Attempt 1
-            print("Watchdog: Kicking " .. s.Name)
-            InitiateKick(s)
-            
-            -- Vote Yes immediately (in case another alt started it)
-            task.wait(0.5)
-            VoteYes()
-            
-            -- Attempt 2 (Double Tap)
-            task.delay(2, function()
-                if s.Parent then 
-                    InitiateKick(s) 
-                    VoteYes()
-                end
-            end)
-        end)
-    end
-end
-
--- 1. Initial Scan (Wait for load)
 task.spawn(function()
     print("Startup: Waiting " .. STARTUP_DELAY .. "s...")
     task.wait(STARTUP_DELAY)
     print("Startup: Executing first scan.")
-    
-    local _, strangers = ScanAndKick() -- Initial scan
-    if #strangers > 0 then
-        ForceKickStrangers(strangers)
-    end
+    ScanAndKick()
 end)
 
--- 2. Persistent Watchdog Loop
 task.spawn(function()
     while task.wait(10) do
         if getgenv().CurrentRunID ~= myRunID then break end
+        local count, strangers = ScanAndKick()
         
-        -- We manually scan here instead of relying solely on ScanAndKick return
-        local strangerList = {}
-        local totalPlayers = 0
-        local myCount = 0
-        
-        for _, p in pairs(Players:GetPlayers()) do
-            totalPlayers = totalPlayers + 1
-            if IsStranger(p) then
-                table.insert(strangerList, p)
-            else
-                myCount = myCount + 1
-            end
-        end
-        
-        -- Logic
-        if #strangerList > 0 then
-            -- Pause farm if not already paused
-            if not getgenv().PauseFarm then getgenv().PauseFarm = true end
+        if strangers then
+            print("Stranger detected in " .. count .. " player lobby. Kicking...")
             
-            -- Only kick if we have enough votes
-            if myCount >= MIN_ACCOUNTS_TO_KICK then
-                print("Watchdog: Found " .. #strangerList .. " strangers. Forcing Kicks...")
-                
-                -- Send Webhook (Anti-Spam)
-                if not notificationSent then
-                    SendWebhook("⚠️ Stranger Detected", 16776960, #strangerList .. " stranger(s) in lobby. Aggressive kick initiated.")
-                    notificationSent = true
-                end
-
-                -- EXECUTE FORCE KICK
-                ForceKickStrangers(strangerList)
-            else
-                print("Watchdog: Stranger found, but not enough alts to kick yet.")
-            end
-            
-        else
-            -- Server Safe
-            if notificationSent then notificationSent = false end
-            
-            -- Resume if needed
-            if getgenv().PauseFarm then RecalculatePauseState() end
-            
-            if totalPlayers >= 14 then
-                print("Server Full & Safe. Watchdog continues monitoring...")
-            end
+            -- 🔔 Send Webhook Alert
+            SendWebhook(
+                "⚠️ Stranger Detected", 
+                16776960, -- Yellow/Orange color
+                "A stranger has been detected and votekick initiated.\n**Total Players:** " .. count
+            )
+        elseif count >= 15 and not strangers then
+            print("Server Full & Safe. Watchdog continues monitoring...")
         end
     end
 end)
