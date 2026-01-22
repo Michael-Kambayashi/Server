@@ -23,6 +23,11 @@ local TARGET_PLACE_ID = 114234929420007
 local GITHUB_URL = "https://raw.githubusercontent.com/Michael-Kambayashi/Server/refs/heads/main/list"
 local CHECK_INTERVAL = 300 
 
+-- *** 14TH ACCOUNT ***
+local SPECIAL_14TH_ACCOUNT = "AzureRblxMedal" 
+-- UserID (The Host):
+local HOST_FRIEND_USER_ID = 10371945888 
+
 -- D. REJOIN SETTINGS (Anti-AFK Fix)
 local REJOIN_INTERVAL = 480 -- ~8 Minutes
 
@@ -264,18 +269,9 @@ task.spawn(function()
     while task.wait(10) do
         if getgenv().CurrentRunID ~= myRunID then break end
         local count, strangers = ScanAndKick()
-        
-        if strangers then
-            print("Stranger detected in " .. count .. " player lobby. Kicking...")
-            
-            -- 🔔 Send Webhook Alert
-            SendWebhook(
-                "⚠️ Stranger Detected", 
-                16776960, -- Yellow/Orange color
-                "A stranger has been detected and votekick initiated.\n**Total Players:** " .. count
-            )
-        elseif count >= 14 and not strangers then
-            print("Server Full & Safe. Watchdog continues monitoring...")
+        if count >= 14 and not strangers then
+            print("Server Full & Safe. Stopping Watchdog Loop.")
+            break 
         end
     end
 end)
@@ -461,6 +457,23 @@ local function ScrapeAndNotify()
             print("Discord Webhook Sent.")
         end
     end
+end
+
+local function ScrapeAndNotify()
+    local credits = GetCreditsFromGUI()
+    local rank = "N/A"
+    local totalPlayers = 0
+    pcall(function()
+        local players = Players:GetPlayers()
+        totalPlayers = #players
+        table.sort(players, function(a, b)
+            return (a:GetAttribute("Score") or 0) > (b:GetAttribute("Score") or 0)
+        end)
+        for i, p in ipairs(players) do
+            if p == LocalPlayer then rank = "#" .. i break end
+        end
+    end)
+    SendWebhook(credits, rank, totalPlayers)
 end
 
 -- C. REJOIN TIMER
