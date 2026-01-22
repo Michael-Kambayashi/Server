@@ -176,9 +176,11 @@ local function RecalculatePauseState()
     print("Watchdog: No strangers remaining. Farm resumed.")
     
     if Workspace:GetAttribute("GameState") == "Round In Progress" then
-        task.wait(0.5)
-        TryKill()
-        print("Farm resumed mid-round - executed delayed kill.")
+        task.spawn(function()
+            task.wait(0.5)
+            TryKill()
+            print("Farm resumed mid-round - executed delayed kill.")
+        end)
     end
     
     return false
