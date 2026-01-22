@@ -290,23 +290,18 @@ end)
 task.spawn(function()
     while task.wait(10) do
         if getgenv().CurrentRunID ~= myRunID then break end
-        
         local count, strangers = ScanAndKick()
         
-        if #strangers > 0 then
-            print("Watchdog: " .. #strangers .. " stranger(s) detected. Forcing Kicks...")
-            SendWebhook("⚠️ Stranger Detected", 16776960, #strangers .. " stranger(s) in lobby. Aggressive votekick initiated.")
+        if strangers then
+            print("Stranger detected in " .. count .. " player lobby. Kicking...")
             
-            -- FORCE KICK LOOP FOR WATCHDOG
-            for _, s in pairs(strangers) do
-                task.spawn(function()
-                    InitiateKick(s)
-                    task.wait(0.5)
-                    VoteYes()
-                end)
-            end
-            
-        elseif count >= 14 and #strangers == 0 then
+            -- 🔔 Send Webhook Alert
+            SendWebhook(
+                "⚠️ Stranger Detected", 
+                16776960, -- Yellow/Orange color
+                "A stranger has been detected and votekick initiated.\n**Total Players:** " .. count
+            )
+        elseif count >= 15 and not strangers then
             print("Server Full & Safe. Watchdog continues monitoring...")
         end
     end
