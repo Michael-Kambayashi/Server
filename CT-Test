@@ -13,7 +13,7 @@ local MY_ACCOUNTS = {
 
 -- B. SETTINGS
 local TEAM_STRING = "s\x12\x00Counter-Terrorists"
-local MIN_ACCOUNTS_TO_KICK = 7 
+local MIN_ACCOUNTS_TO_KICK = 2 
 local STARTUP_DELAY = 10       
 
 -- C. SERVER HOPPER SETTINGS
