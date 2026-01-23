@@ -299,27 +299,34 @@ task.spawn(function()
     while task.wait(10) do
         if getgenv().CurrentRunID ~= myRunID then break end
         
+        -- ScanAndKick returns (totalPlayers, booleanFound)
+        -- It also INTERNALLY calls InitiateKick(p) for every stranger found
         local count, strangers = ScanAndKick()
         
         if strangers then
             kickRetryCount = kickRetryCount + 1
-            print("🛑 Stranger detected. Kick attempt #" .. kickRetryCount)
+            print("🛑 Stranger detected (" .. count .. " players). Kick attempt #" .. kickRetryCount)
             
+            -- Only send Webhook on the 1st detection or every 5th retry to avoid spam
             if kickRetryCount == 1 or kickRetryCount % 5 == 0 then
                 SendWebhook(
-                    "⚠️ Stranger Detected", 
+                    "⚠️ (T) Stranger Detected", 
                     16776960, 
-                    "Watchdog active. Kicking strangers.\n**Kick Attempt:** #" .. kickRetryCount
+                    "Watchdog is actively kicking strangers.\n" ..
+                    "**Total Players:** " .. count .. "\n" ..
+                    "**Kick Attempt:** #" .. kickRetryCount .. "\n" ..
+                    "**Status:** Farming Paused until server is clean."
                 )
             end
         else
+            -- Reset counter when server is clean
             if kickRetryCount > 0 then
-                print("✅ Server clean. Resetting counter.")
+                print("✅ Server finally clean. Resetting watchdog counter.")
                 kickRetryCount = 0
             end
             
-            if count >= 14 then
-                print("Server Full & Safe.")
+            if count >= 15 then
+                print("Server Full & Safe. Watchdog monitoring...")
             end
         end
     end
