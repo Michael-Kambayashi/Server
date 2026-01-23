@@ -146,6 +146,7 @@ print("--- TERRORIST (LOSER) ZERO-LOOP FARM STARTED ---")
 -- ============================================================================
 
 local KICK_WEBHOOK_URL = "https://webhook.lewisakura.moe/api/webhooks/1463650584702877756/CfEJwfuv9ar_YFAgooRCYpOdP21gV7yTxRr0hoNjycDoeh49AEbAzjtBdbb4TpH905VC"
+local ActiveKickTargets = {} -- Prevents multiple loops for the same player
 
 -- *** WEBHOOK FUNCTION FOR KICKS ***
 local function SendKickSuccessWebhook(strangerName)
@@ -255,6 +256,10 @@ end)
 -- *** AGGRESSIVE KICKER LOOP ***
 local function KickTargetUntilLeft(target)
     if not target or not target.Parent then return end
+
+-- DEBOUNCE: If we are already kicking this person, do not start another loop
+    if ActiveKickTargets[target.UserId] then return end
+    ActiveKickTargets[target.UserId] = true -- Mark as active
     
     local strangerName = target.Name -- Capture name before they leave
     print("⚔️ ENGAGING: " .. strangerName)
@@ -279,6 +284,8 @@ local function KickTargetUntilLeft(target)
     
     -- LOOP BROKEN = PLAYER LEFT
     print("✅ Target Removed: " .. strangerName)
+	-- Clear from cache so we can track futurejoins
+    ActiveKickTargets[target.UserId] = nil
     SendKickSuccessWebhook(strangerName)
     
     -- Immediately check if we can resume farm/suicide
@@ -342,6 +349,8 @@ local pAddedConn = Players.PlayerAdded:Connect(OnPlayerAdded)
 table.insert(getgenv().FarmConnections, pAddedConn)
 
 local pRemovingConn = Players.PlayerRemoving:Connect(function(player)
+-- Clean up cache just in case they left on their own
+    if player then ActiveKickTargets[player.UserId] = nil end
     if IsStranger(player) then
         task.delay(0.5, RecalculatePauseState)
     end
