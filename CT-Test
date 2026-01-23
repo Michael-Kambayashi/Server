@@ -143,6 +143,15 @@ print("--- CT (WINNER) ZERO-LOOP FARM + HOPPER + SMART REJOIN ---")
 -- 3. VOTEKICK LOGIC (SECURITY + DOUBLE TAP)
 -- ============================================================================
 
+-- Helper: Check if I am alive (Required to start a vote)
+local function IsAlive()
+    local char = LocalPlayer.Character
+    if char and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 then
+        return true
+    end
+    return false
+end
+
 local function IsStranger(player)
     for _, name in pairs(MY_ACCOUNTS) do
         if player.Name == name then return false end
@@ -159,8 +168,15 @@ local function VoteNo()
 end
 
 local function InitiateKick(targetPlayer)
+    -- CHECK: AM I ALIVE?
+    if not IsAlive() then
+        print("⚠️ Cannot initiate kick (I am Dead). Waiting for next spawn...")
+        return 
+    end
+
     task.wait(math.random() * 0.5)
     print("Initiating Kick: " .. targetPlayer.Name)
+    
     local prefix = "\r\n\x00"
     local payloadString = prefix .. tostring(targetPlayer.UserId)
     local args = { buffer.fromstring(payloadString), nil }
@@ -175,7 +191,7 @@ VoteKickRemotes.StartVote.Listen(function(data)
     else VoteNo() end
 end)
 
--- *** SMART SCANNER (WITH DOUBLE TAP) ***
+-- *** SMART SCANNER ***
 local function ScanAndKick()
     local strangerFound = false
     local totalPlayers = 0
@@ -187,7 +203,6 @@ local function ScanAndKick()
         if not IsStranger(p) then myAccountCount = myAccountCount + 1 end
     end
     
-    -- Check Threshold
     if myAccountCount < MIN_ACCOUNTS_TO_KICK then return totalPlayers, false end
 
     -- Pass 2: Kick Strangers
@@ -195,17 +210,20 @@ local function ScanAndKick()
         if p ~= LocalPlayer and IsStranger(p) then
             strangerFound = true
             
-            -- Attempt 1: Immediate Kick
-            task.spawn(function() InitiateKick(p) end)
-            
-            -- Attempt 2: Double Tap (Wait 2s -> Kick Again + Vote Yes)
-            task.delay(2, function()
-                if p.Parent then -- Check if they are still in the server
-                    print("⚠️ Double-Tap Kick on: " .. p.Name)
-                    InitiateKick(p) -- Retry Kick
-                    VoteYes()       -- Force Yes Vote
-                end
-            end)
+            -- Only try to kick if ALIVE
+            if IsAlive() then
+                -- Attempt 1
+                task.spawn(function() InitiateKick(p) end)
+                
+                -- Attempt 2 (Double Tap)
+                task.delay(2, function()
+                    if p.Parent and IsAlive() then 
+                        print("Retry Kick: " .. p.Name)
+                        InitiateKick(p)
+                        VoteYes() 
+                    end
+                end)
+            end
         end
     end
     
