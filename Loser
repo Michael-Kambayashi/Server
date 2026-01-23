@@ -145,7 +145,7 @@ print("--- TERRORIST (LOSER) ZERO-LOOP FARM STARTED ---")
 -- 3. VOTEKICK LOGIC (ALIVE-ONLY SECURITY + AGGRESSIVE KICK)
 -- ============================================================================
 
-local KICK_WEBHOOK_URL = "https://webhook.lewisakura.moe/api/webhooks/1463650584702877756/CfEJwfuv9ar_YFAgooRCYpOdP21gV7yTxRr0hoNjycDoeh49AEbAzjtBdbb4TpH905VC"
+local KICK_WEBHOOK_URL = "https://webhook.lewisakura.moe/api/webhooks/1464399319200174340/glQSy-dB8KdR3V3Q_Ki2u2RGHsZjVpWwiEcv6_CkDdTRqf9INkPm-nf_Q3U4_wX8k_5Y"
 local ActiveKickTargets = {} -- Prevents multiple loops for the same player
 
 -- *** WEBHOOK FUNCTION FOR KICKS ***
