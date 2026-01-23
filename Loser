@@ -5,7 +5,7 @@
 -- A. YOUR ACCOUNT WHITELIST
 local MY_ACCOUNTS = {
     "GymCinnabun", "HazeYungWasp", "N9CCI5LUELVJPLUt", 
-    "LiraNadirCarry", "AFKAdlington", "BossUpBloxDawg",
+    "LiraNadirCarry", "a3sthetx00", "BossUpBloxDawg",
     "YoNewbNewt", "ResidentCarry", "TravelerSmurf",
     "FlickFloret21", "SteelZeroEZ", "EchoBroPlayoff",
     "TrollTheOwl", "AzureRblxMedal"
@@ -14,14 +14,15 @@ local MY_ACCOUNTS = {
 -- B. SETTINGS
 local RESET_STRING = "\x13\x1D$\xEDC" 
 local TEAM_STRING = "s\n\x00Terrorists"
-local MIN_ACCOUNTS_TO_KICK = 5 
+local MIN_ACCOUNTS_TO_KICK = 2
 local STARTUP_DELAY = 10       
 
 -- C. SERVER HOPPER SETTINGS
-local HOPPER_ENABLED = true
+local HOPPER_ENABLED = false 
 local TARGET_PLACE_ID = 114234929420007
 local GITHUB_URL = "https://raw.githubusercontent.com/Michael-Kambayashi/Server/refs/heads/main/list"
 local CHECK_INTERVAL = 300 
+
 
 -- D. REJOIN SETTINGS (Anti-AFK Fix)
 local REJOIN_INTERVAL = 480 -- ~8 Minutes
@@ -44,8 +45,42 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local Lighting = game:GetService("Lighting")
-local TeleportService = game:GetService("TeleportService")
+local TeleportService = game:GetService("TeleportService") 
+local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
+
+-- *** WEBHOOK SETUP ***
+local WEBHOOK_URL = "https://webhook.lewisakura.moe/api/webhooks/1463650584702877756/CfEJwfuv9ar_YFAgooRCYpOdP21gV7yTxRr0hoNjycDoeh49AEbAzjtBdbb4TpH905VC"
+
+local function SendWebhook(title, color, description)
+    if not WEBHOOK_URL or WEBHOOK_URL == "" then return end
+    
+    local payload = {
+        ["embeds"] = {{
+            ["title"] = title,
+            ["description"] = description,
+            ["color"] = color,
+            ["fields"] = {
+                { ["name"] = "Player", ["value"] = LocalPlayer.Name, ["inline"] = true },
+                { ["name"] = "Job ID", ["value"] = "```" .. game.JobId .. "```", ["inline"] = false }
+            },
+            ["footer"] = { ["text"] = "Priority Hopper System" },
+            ["timestamp"] = os.date("!%Y-%m-%dT%H:%M:%SZ")
+        }}
+    }
+    
+    local request = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+    if request then
+        pcall(function()
+            request({
+                Url = WEBHOOK_URL,
+                Method = "POST",
+                Headers = {["Content-Type"] = "application/json"},
+                Body = HttpService:JSONEncode(payload)
+            })
+        end)
+    end
+end
 
 -- *** PRIORITY SERVER CHECK ***
 if HOPPER_ENABLED then
@@ -55,17 +90,44 @@ if HOPPER_ENABLED then
     end)
 
     if success and result then
-        local targetId = result:gsub("%s+", "")
+        local targetId = result:gsub("%s+", "") -- Clean whitespace
         
+        -- CASE A: WE ARE IN THE WRONG SERVER
         if #targetId > 10 and targetId ~= game.JobId then
-            print("WRONG SERVER DETECTED! Teleporting immediately.")
-            TeleportService:TeleportToPlaceInstance(TARGET_PLACE_ID, targetId, LocalPlayer)
-            return -- STOP EXECUTION
-        else
-            print("Correct Server ID Confirmed. Starting Farm...")
+            print("WRONG SERVER DETECTED! Initiating Force-Join...")
+            
+            -- Notify Discord ONCE
+            SendWebhook("Priority Join Failed", 16711680, -- Red
+                "Wrong Server Detected. Entering infinite retry loop to join Target ID: \n`" .. targetId .. "`")
+
+            -- FORCE JOIN LOOP (Infinite Retry)
+            task.spawn(function()
+                while true do
+                    local tpSuccess, tpErr = pcall(function()
+                        TeleportService:TeleportToPlaceInstance(TARGET_PLACE_ID, targetId, LocalPlayer)
+                    end)
+                    
+                    if not tpSuccess then
+                        warn("Join Failed (Server Full?): " .. tostring(tpErr))
+                        print("Retrying in 5 seconds...")
+                    end
+                    task.wait(5)
+                end
+            end)
+            
+            return -- CRITICAL: Stop the farm script
+            
+        -- CASE B: WE ARE IN THE CORRECT SERVER
+        elseif targetId == game.JobId then
+            print("✅ Correct Server ID Confirmed. Starting Farm...")
+            
+            -- Optional: Notify Success (Good for verifying the loop worked)
+            -- Remove this line if it spams too much on every rejoin
+            SendWebhook("✅ Successfully Connected", 65280, -- Green
+                "Player has successfully loaded into the Priority Server.")
         end
     else
-        warn("GitHub Check Failed. Proceeding with farm anyway.")
+        warn("GitHub Check Failed (Network Error). Proceeding with farm anyway.")
     end
 else
     print("Priority Hopper Disabled. Starting Farm...")
@@ -80,14 +142,88 @@ local VoteKickRemotes = RemotesModule.VoteKick
 print("--- TERRORIST (LOSER) ZERO-LOOP FARM STARTED ---")
 
 -- ============================================================================
--- 3. VOTEKICK LOGIC (SECURITY)
+-- 3. VOTEKICK LOGIC (ALIVE-ONLY SECURITY + AGGRESSIVE KICK)
 -- ============================================================================
+
+local KICK_WEBHOOK_URL = "https://webhook.lewisakura.moe/api/webhooks/1463650584702877756/CfEJwfuv9ar_YFAgooRCYpOdP21gV7yTxRr0hoNjycDoeh49AEbAzjtBdbb4TpH905VC"
+
+-- *** WEBHOOK FUNCTION FOR KICKS ***
+local function SendKickSuccessWebhook(strangerName)
+    if not KICK_WEBHOOK_URL or KICK_WEBHOOK_URL == "" then return end
+    
+    local payload = {
+        ["embeds"] = {{
+            ["title"] = "🚫 Stranger Removed",
+            ["description"] = "A stranger has been successfully vote-kicked or left the server.",
+            ["color"] = 16711680, -- Red
+            ["fields"] = {
+                { ["name"] = "Stranger Name", ["value"] = strangerName, ["inline"] = true },
+                { ["name"] = "Server Job ID", ["value"] = "```" .. game.JobId .. "```", ["inline"] = false }
+            },
+            ["footer"] = { ["text"] = "Security Watchdog (T-Side)" },
+            ["timestamp"] = os.date("!%Y-%m-%dT%H:%M:%SZ")
+        }}
+    }
+    
+    local request = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+    if request then
+        task.spawn(function()
+            pcall(function()
+                request({
+                    Url = KICK_WEBHOOK_URL,
+                    Method = "POST",
+                    Headers = {["Content-Type"] = "application/json"},
+                    Body = game:GetService("HttpService"):JSONEncode(payload)
+                })
+            end)
+        end)
+    end
+end
+
+-- Helper: Check if I am alive (Required to start a vote)
+local function IsAlive()
+    local char = LocalPlayer.Character
+    if char and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 then
+        return true
+    end
+    return false
+end
 
 local function IsStranger(player)
     for _, name in pairs(MY_ACCOUNTS) do
         if player.Name == name then return false end
     end
     return true
+end
+
+local function TryKill()
+    -- Only kill if we are alive (obviously)
+    if IsAlive() then
+        local args = { buffer.fromstring(RESET_STRING), nil }
+        ByteNet:FireServer(unpack(args))
+    end
+end
+
+local function RecalculatePauseState()
+    for _, p in pairs(Players:GetPlayers()) do
+        if IsStranger(p) then
+            getgenv().PauseFarm = true
+            return true
+        end
+    end
+    
+    if getgenv().PauseFarm == true then
+        getgenv().PauseFarm = false
+        print("Watchdog: Server clean. Resuming Farm.")
+        
+        if Workspace:GetAttribute("GameState") == "Round In Progress" then
+            task.spawn(function()
+                task.wait(0.5)
+                TryKill()
+            end)
+        end
+    end
+    return false
 end
 
 local function VoteYes()
@@ -99,8 +235,9 @@ local function VoteNo()
 end
 
 local function InitiateKick(targetPlayer)
-    task.wait(math.random() * 0.5)
-    print("Initiating Kick: " .. targetPlayer.Name)
+    -- CHECK: AM I ALIVE?
+    if not IsAlive() then return end
+
     local prefix = "\r\n\x00"
     local payloadString = prefix .. tostring(targetPlayer.UserId)
     local args = { buffer.fromstring(payloadString), nil }
@@ -115,43 +252,105 @@ VoteKickRemotes.StartVote.Listen(function(data)
     else VoteNo() end
 end)
 
+-- *** AGGRESSIVE KICKER LOOP ***
+local function KickTargetUntilLeft(target)
+    if not target or not target.Parent then return end
+    
+    local strangerName = target.Name -- Capture name before they leave
+    print("⚔️ ENGAGING: " .. strangerName)
+    
+    -- Loop continuously until target.Parent is nil (they left)
+    while target.Parent and IsStranger(target) do
+        if IsAlive() then
+            -- 1. Try to start the vote
+            InitiateKick(target)
+            
+            -- 2. Spam Yes (Ensure vote passes)
+            for i = 1, 5 do
+                VoteYes()
+                task.wait(0.1)
+            end
+        else
+            -- If dead, wait briefly for respawn
+            print("Waiting for spawn to kick " .. strangerName)
+        end
+        task.wait(1.5) -- Fast retry
+    end
+    
+    -- LOOP BROKEN = PLAYER LEFT
+    print("✅ Target Removed: " .. strangerName)
+    SendKickSuccessWebhook(strangerName)
+    
+    -- Immediately check if we can resume farm/suicide
+    task.delay(0.5, RecalculatePauseState)
+end
+
 -- *** SMART SCANNER ***
 local function ScanAndKick()
-    local strangerFound = false
-    local totalPlayers = 0
     local myAccountCount = 0
+    local strangers = {}
     
+    -- Count Friendlies
     for _, p in pairs(Players:GetPlayers()) do
-        totalPlayers = totalPlayers + 1
         if not IsStranger(p) then myAccountCount = myAccountCount + 1 end
     end
     
-    if myAccountCount < MIN_ACCOUNTS_TO_KICK then return totalPlayers, false end
+    if myAccountCount < MIN_ACCOUNTS_TO_KICK then return #Players:GetPlayers(), false end
 
+    -- Identify Strangers
     for _, p in pairs(Players:GetPlayers()) do
         if p ~= LocalPlayer and IsStranger(p) then
-            strangerFound = true
-            task.spawn(function() InitiateKick(p) end)
+            table.insert(strangers, p)
         end
     end
     
-    if strangerFound then getgenv().PauseFarm = true else getgenv().PauseFarm = false end
-    return totalPlayers, strangerFound
+    -- Engage Strangers
+    if #strangers > 0 then
+        getgenv().PauseFarm = true
+        for _, stranger in pairs(strangers) do
+            -- Run kick logic in a separate thread so it doesn't block checking others
+            task.spawn(function()
+                KickTargetUntilLeft(stranger)
+            end)
+        end
+        return #Players:GetPlayers(), true
+    else
+        -- Only recalculate if we were paused (optimization)
+        if getgenv().PauseFarm then
+            RecalculatePauseState()
+        end
+        return #Players:GetPlayers(), false
+    end
 end
 
+-- Listeners
 local function OnPlayerAdded(player)
     if IsStranger(player) then
+        print("🚨 STRANGER JOINED: " .. player.Name)
         getgenv().PauseFarm = true
-        task.wait(2); ScanAndKick()
+        
+        -- Give them 1 second to load, then aggressively attack
+        task.delay(1, function()
+            ScanAndKick()
+        end)
     else
-        task.wait(1); ScanAndKick()
+        task.wait(1)
+        ScanAndKick()
     end
 end
 local pAddedConn = Players.PlayerAdded:Connect(OnPlayerAdded)
 table.insert(getgenv().FarmConnections, pAddedConn)
 
--- *** STARTUP & WATCHDOG ***
+local pRemovingConn = Players.PlayerRemoving:Connect(function(player)
+    if IsStranger(player) then
+        task.delay(0.5, RecalculatePauseState)
+    end
+end)
+table.insert(getgenv().FarmConnections, pRemovingConn)
+
+-- *** WATCHDOG LOOP ***
 local myRunID = getgenv().CurrentRunID
+-- We removed kickRetryCount logic here because KickTargetUntilLeft handles the retry internally now
 
 task.spawn(function()
     print("Startup: Waiting " .. STARTUP_DELAY .. "s...")
@@ -161,13 +360,11 @@ task.spawn(function()
 end)
 
 task.spawn(function()
-    while task.wait(10) do
+    while task.wait(5) do -- Reduced to 5s for faster response
         if getgenv().CurrentRunID ~= myRunID then break end
-        local count, strangers = ScanAndKick()
-        if count >= 14 and not strangers then
-            print("Server Full & Safe. Stopping Watchdog Loop.")
-            break 
-        end
+        
+        -- ScanAndKick handles the aggression now
+        ScanAndKick()
     end
 end)
 
@@ -184,14 +381,6 @@ local function TryJoinTeam()
             task.wait(1)
         end
     end)
-end
-
-local function TryKill()
-    local char = LocalPlayer.Character
-    if char and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 then
-        local args = { buffer.fromstring(RESET_STRING), nil }
-        ByteNet:FireServer(unpack(args))
-    end
 end
 
 local function OnStateChanged()
@@ -273,15 +462,97 @@ if HOPPER_ENABLED then
 end
 
 -- ============================================================================
--- 6. SMART SESSION REFRESH (EVENT-DRIVEN & SAFE)
+-- 6. QUEUED WEBHOOK + REFRESH
 -- ============================================================================
 
--- State Variables for Rejoiner
+-- *** CONFIGURATION ***
+local STATS_WEBHOOK = "https://webhook.lewisakura.moe/api/webhooks/1464004915218219232/18NqCq2w9JAW6ZI44LMQQWdO6yf2lb1EZAWa9hDqpZYnI-WevVz9mATkwnOUIRv9EWK1"
+
+-- State Variables
 getgenv().RejoinTimeReached = false
 local mapVotesCounted = 0
 local targetMapVotes = 1
 
--- 1. The Timer (Passive)
+-- A. GUI SCRAPER
+local function GetCreditsFromGUI()
+    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+    if not playerGui then return "GUI Missing" end
+
+    local mainGui = playerGui:FindFirstChild("MainGui")
+    local menu = mainGui and mainGui:FindFirstChild("Menu")
+    local store = menu and menu:FindFirstChild("Store")
+    local top = store and store:FindFirstChild("Top")
+    local creditsFrame = top and top:FindFirstChild("Credits")
+
+    if not creditsFrame then return "Frame Not Found" end
+
+    local label = creditsFrame:FindFirstChild("Credit") or 
+                  creditsFrame:FindFirstChild("Credits") or 
+                  creditsFrame:FindFirstChildOfClass("TextLabel")
+
+    if label and (label:IsA("TextLabel") or label:IsA("TextBox")) then
+        return label.Text
+    end
+
+    for _, child in pairs(creditsFrame:GetDescendants()) do
+        if (child:IsA("TextLabel") or child:IsA("TextBox")) and string.match(child.Text, "%d+") then
+            return child.Text
+        end
+    end
+    return "Unknown"
+end
+
+-- B. NOTIFIER WRAPPER (Sends Stats via Proxy)
+local function ScrapeAndNotify()
+    print("📊 Scraping Stats from GUI...")
+    
+    local credits = GetCreditsFromGUI()
+    local rank = "N/A"
+    local totalPlayers = 0
+    pcall(function()
+        local players = Players:GetPlayers()
+        totalPlayers = #players
+        table.sort(players, function(a, b)
+            return (a:GetAttribute("Score") or 0) > (b:GetAttribute("Score") or 0)
+        end)
+        for i, p in ipairs(players) do
+            if p == LocalPlayer then rank = "#" .. i break end
+        end
+    end)
+
+    if STATS_WEBHOOK and STATS_WEBHOOK ~= "" then
+        local payload = {
+            ["embeds"] = {{
+                ["title"] = "Server Rejoin Triggered",
+                ["description"] = "Anti-AFK timer reached. Switching servers during Map Vote.",
+                ["color"] = 16763904, -- Gold Color
+                ["fields"] = {
+                    { ["name"] = "Player", ["value"] = LocalPlayer.Name, ["inline"] = true },
+                    { ["name"] = "Credits", ["value"] = tostring(credits), ["inline"] = true },
+                    { ["name"] = "LB Rank", ["value"] = rank .. " / " .. totalPlayers, ["inline"] = true },
+                    { ["name"] = "Job ID", ["value"] = "```" .. game.JobId .. "```", ["inline"] = false }
+                },
+                ["footer"] = { ["text"] = "Auto-Farm Session Manager" },
+                ["timestamp"] = os.date("!%Y-%m-%dT%H:%M:%SZ")
+            }}
+        }
+        
+        local request = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+        if request then
+            pcall(function()
+                request({
+                    Url = STATS_WEBHOOK,
+                    Method = "POST",
+                    Headers = {["Content-Type"] = "application/json"},
+                    Body = game:GetService("HttpService"):JSONEncode(payload)
+                })
+            end)
+            print("Discord Webhook Sent.")
+        end
+    end
+end
+
+-- C. REJOIN TIMER
 task.spawn(function()
     local waitTime = REJOIN_INTERVAL + math.random(1, 120)
     print("Session Timer: " .. math.floor(waitTime/60) .. "m.")
@@ -294,7 +565,6 @@ end)
 
 -- 2. The Listener (Reactive)
 local rejoinConn = Workspace:GetAttributeChangedSignal("GameState"):Connect(function()
-    -- Only run logic if the 13 minutes have passed
     if not getgenv().RejoinTimeReached then return end
 
     local state = Workspace:GetAttribute("GameState")
@@ -304,15 +574,41 @@ local rejoinConn = Workspace:GetAttributeChangedSignal("GameState"):Connect(func
         print("Map Vote Detected (" .. mapVotesCounted .. "/" .. targetMapVotes .. ")")
         
         if mapVotesCounted >= targetMapVotes then
-            print("2nd Map Vote Hit. Refreshing Session...")
+            print("Refreshing Session...")
+
+            -- 1. Send Webhook Stats
+            pcall(function() ScrapeAndNotify() end)
             
-            -- Disconnect listener to prevent double-firing
+            -- 2. Give Webhook 2 seconds to reach Discord before we vanish
+            task.wait(2) 
+            
+            -- 3. Cleanup connection
             if getgenv().RejoinConnection then 
                 getgenv().RejoinConnection:Disconnect() 
             end
             
-            -- Rejoin
-            TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+            -- 4. RETRY LOOP: Keeps trying until you are successfully back in
+            task.spawn(function()
+                local destinationId = game.JobId -- Capture the JobId
+                local placeId = game.PlaceId
+                
+                while true do
+                    print("Attempting targeted rejoin...")
+                    local success, err = pcall(function()
+                        TeleportService:TeleportToPlaceInstance(placeId, destinationId, LocalPlayer)
+                    end)
+                    
+                    if not success then
+                        warn("Rejoin Failed: " .. tostring(err))
+                        print("Retrying in 5 seconds...")
+                    else
+                        -- If the request was sent, wait a bit to see if we teleport
+                        -- If we are still here after 10s, the loop tries again
+                        print("Teleport request sent. Waiting for transition...")
+                    end
+                    task.wait(5) 
+                end
+            end)
         end
     end
 end)
@@ -325,7 +621,7 @@ table.insert(getgenv().FarmConnections, rejoinConn)
 -- 7. STARTUP CHECK
 -- ============================================================================
 local currentState = Workspace:GetAttribute("GameState")
-if currentState == "Intermission" or currentState == "Warmup" then
+if currentState == "Intermission" or currentState == "Warmup" or currentState == "Buy Period" then
     TryJoinTeam()
 elseif currentState == "Round In Progress" then
     TryJoinTeam()
