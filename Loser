@@ -142,44 +142,8 @@ local VoteKickRemotes = RemotesModule.VoteKick
 print("--- TERRORIST (LOSER) ZERO-LOOP FARM STARTED ---")
 
 -- ============================================================================
--- 3. VOTEKICK LOGIC (ALIVE-ONLY SECURITY + AGGRESSIVE KICK)
+-- 3. VOTEKICK LOGIC (ALIVE-ONLY SECURITY)
 -- ============================================================================
-
-local KICK_WEBHOOK_URL = "https://webhook.lewisakura.moe/api/webhooks/1464399319200174340/glQSy-dB8KdR3V3Q_Ki2u2RGHsZjVpWwiEcv6_CkDdTRqf9INkPm-nf_Q3U4_wX8k_5Y"
-local ActiveKickTargets = {} -- Prevents multiple loops for the same player
-
--- *** WEBHOOK FUNCTION FOR KICKS ***
-local function SendKickSuccessWebhook(strangerName)
-    if not KICK_WEBHOOK_URL or KICK_WEBHOOK_URL == "" then return end
-    
-    local payload = {
-        ["embeds"] = {{
-            ["title"] = "🚫 Stranger Removed",
-            ["description"] = "A stranger has been successfully vote-kicked or left the server.",
-            ["color"] = 16711680, -- Red
-            ["fields"] = {
-                { ["name"] = "Stranger Name", ["value"] = strangerName, ["inline"] = true },
-                { ["name"] = "Server Job ID", ["value"] = "```" .. game.JobId .. "```", ["inline"] = false }
-            },
-            ["footer"] = { ["text"] = "Security Watchdog (T-Side)" },
-            ["timestamp"] = os.date("!%Y-%m-%dT%H:%M:%SZ")
-        }}
-    }
-    
-    local request = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
-    if request then
-        task.spawn(function()
-            pcall(function()
-                request({
-                    Url = KICK_WEBHOOK_URL,
-                    Method = "POST",
-                    Headers = {["Content-Type"] = "application/json"},
-                    Body = game:GetService("HttpService"):JSONEncode(payload)
-                })
-            end)
-        end)
-    end
-end
 
 -- Helper: Check if I am alive (Required to start a vote)
 local function IsAlive()
@@ -227,6 +191,7 @@ local function RecalculatePauseState()
     return false
 end
 
+-- Voting Yes/No usually works even if dead, but we wrap it just in case
 local function VoteYes()
     pcall(function() VoteKickRemotes.VoteYes.Send({ Voter = tostring(LocalPlayer.UserId), Amount = 0 }) end)
 end
@@ -237,8 +202,14 @@ end
 
 local function InitiateKick(targetPlayer)
     -- CHECK: AM I ALIVE?
-    if not IsAlive() then return end
+    if not IsAlive() then
+        print("⚠️ Cannot initiate kick (I am Dead). Waiting for next spawn...")
+        return 
+    end
 
+    task.wait(math.random() * 0.5)
+    print("Initiating Kick: " .. targetPlayer.Name)
+    
     local prefix = "\r\n\x00"
     local payloadString = prefix .. tostring(targetPlayer.UserId)
     local args = { buffer.fromstring(payloadString), nil }
@@ -253,104 +224,60 @@ VoteKickRemotes.StartVote.Listen(function(data)
     else VoteNo() end
 end)
 
--- *** AGGRESSIVE KICKER LOOP ***
-local function KickTargetUntilLeft(target)
-    if not target or not target.Parent then return end
-
--- DEBOUNCE: If we are already kicking this person, do not start another loop
-    if ActiveKickTargets[target.UserId] then return end
-    ActiveKickTargets[target.UserId] = true -- Mark as active
-    
-    local strangerName = target.Name -- Capture name before they leave
-    print("⚔️ ENGAGING: " .. strangerName)
-    
-    -- Loop continuously until target.Parent is nil (they left)
-    while target.Parent and IsStranger(target) do
-        if IsAlive() then
-            -- 1. Try to start the vote
-            InitiateKick(target)
-            
-            -- 2. Spam Yes (Ensure vote passes)
-            for i = 1, 5 do
-                VoteYes()
-                task.wait(0.1)
-            end
-        else
-            -- If dead, wait briefly for respawn
-            print("Waiting for spawn to kick " .. strangerName)
-        end
-        task.wait(1.5) -- Fast retry
-    end
-    
-    -- LOOP BROKEN = PLAYER LEFT
-    print("✅ Target Removed: " .. strangerName)
-	-- Clear from cache so we can track futurejoins
-    ActiveKickTargets[target.UserId] = nil
-    SendKickSuccessWebhook(strangerName)
-    
-    -- Immediately check if we can resume farm/suicide
-    task.delay(0.5, RecalculatePauseState)
-end
-
 -- *** SMART SCANNER ***
 local function ScanAndKick()
+    local strangerFound = false
+    local totalPlayers = 0
     local myAccountCount = 0
-    local strangers = {}
     
-    -- Count Friendlies
+    -- Pass 1: Count Friendlies
     for _, p in pairs(Players:GetPlayers()) do
+        totalPlayers = totalPlayers + 1
         if not IsStranger(p) then myAccountCount = myAccountCount + 1 end
     end
     
-    if myAccountCount < MIN_ACCOUNTS_TO_KICK then return #Players:GetPlayers(), false end
+    if myAccountCount < MIN_ACCOUNTS_TO_KICK then return totalPlayers, false end
 
-    -- Identify Strangers
+    -- Pass 2: Kick Strangers
     for _, p in pairs(Players:GetPlayers()) do
         if p ~= LocalPlayer and IsStranger(p) then
-            table.insert(strangers, p)
+            strangerFound = true
+            
+            -- Only try to kick if ALIVE
+            if IsAlive() then
+                -- Attempt 1
+                task.spawn(function() InitiateKick(p) end)
+                
+                -- Attempt 2 (Double Tap)
+                task.delay(2, function()
+                    if p.Parent and IsAlive() then 
+                        print("Retry Kick: " .. p.Name)
+                        InitiateKick(p)
+                        VoteYes() 
+                    end
+                end)
+            end
         end
     end
     
-    -- Engage Strangers
-    if #strangers > 0 then
-        getgenv().PauseFarm = true
-        for _, stranger in pairs(strangers) do
-            -- Run kick logic in a separate thread so it doesn't block checking others
-            task.spawn(function()
-                KickTargetUntilLeft(stranger)
-            end)
-        end
-        return #Players:GetPlayers(), true
-    else
-        -- Only recalculate if we were paused (optimization)
-        if getgenv().PauseFarm then
-            RecalculatePauseState()
-        end
-        return #Players:GetPlayers(), false
-    end
+    if strangerFound then getgenv().PauseFarm = true else RecalculatePauseState() end
+
+    return totalPlayers, strangerFound
 end
 
 -- Listeners
 local function OnPlayerAdded(player)
     if IsStranger(player) then
-        print("🚨 STRANGER JOINED: " .. player.Name)
         getgenv().PauseFarm = true
-        
-        -- Give them 1 second to load, then aggressively attack
-        task.delay(1, function()
-            ScanAndKick()
-        end)
+        task.wait(2); ScanAndKick()
     else
-        task.wait(1)
-        ScanAndKick()
+        task.wait(1); ScanAndKick()
     end
 end
 local pAddedConn = Players.PlayerAdded:Connect(OnPlayerAdded)
 table.insert(getgenv().FarmConnections, pAddedConn)
 
 local pRemovingConn = Players.PlayerRemoving:Connect(function(player)
--- Clean up cache just in case they left on their own
-    if player then ActiveKickTargets[player.UserId] = nil end
     if IsStranger(player) then
         task.delay(0.5, RecalculatePauseState)
     end
@@ -359,7 +286,7 @@ table.insert(getgenv().FarmConnections, pRemovingConn)
 
 -- *** WATCHDOG LOOP ***
 local myRunID = getgenv().CurrentRunID
--- We removed kickRetryCount logic here because KickTargetUntilLeft handles the retry internally now
+local kickRetryCount = 0
 
 task.spawn(function()
     print("Startup: Waiting " .. STARTUP_DELAY .. "s...")
@@ -369,11 +296,39 @@ task.spawn(function()
 end)
 
 task.spawn(function()
-    while task.wait(5) do -- Reduced to 5s for faster response
+    while task.wait(10) do
         if getgenv().CurrentRunID ~= myRunID then break end
         
-        -- ScanAndKick handles the aggression now
-        ScanAndKick()
+        -- ScanAndKick returns (totalPlayers, booleanFound)
+        -- It also INTERNALLY calls InitiateKick(p) for every stranger found
+        local count, strangers = ScanAndKick()
+        
+        if strangers then
+            kickRetryCount = kickRetryCount + 1
+            print("🛑 Stranger detected (" .. count .. " players). Kick attempt #" .. kickRetryCount)
+            
+            -- Only send Webhook on the 1st detection or every 5th retry to avoid spam
+            if kickRetryCount == 1 or kickRetryCount % 5 == 0 then
+                SendWebhook(
+                    "⚠️ (T) Stranger Detected", 
+                    16776960, 
+                    "Watchdog is actively kicking strangers.\n" ..
+                    "**Total Players:** " .. count .. "\n" ..
+                    "**Kick Attempt:** #" .. kickRetryCount .. "\n" ..
+                    "**Status:** Farming Paused until server is clean."
+                )
+            end
+        else
+            -- Reset counter when server is clean
+            if kickRetryCount > 0 then
+                print("✅ Server finally clean. Resetting watchdog counter.")
+                kickRetryCount = 0
+            end
+            
+            if count >= 15 then
+                print("Server Full & Safe. Watchdog monitoring...")
+            end
+        end
     end
 end)
 
