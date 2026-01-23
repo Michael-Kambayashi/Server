@@ -144,6 +144,7 @@ print("--- CT (WINNER) ZERO-LOOP FARM + HOPPER + SMART REJOIN ---")
 -- ============================================================================
 
 local KICK_WEBHOOK_URL = "https://webhook.lewisakura.moe/api/webhooks/1463650584702877756/CfEJwfuv9ar_YFAgooRCYpOdP21gV7yTxRr0hoNjycDoeh49AEbAzjtBdbb4TpH905VC"
+local ActiveKickTargets = {}
 
 -- *** WEBHOOK FUNCTION FOR KICKS ***
 local function SendKickSuccessWebhook(strangerName)
@@ -227,6 +228,9 @@ end)
 -- *** AGGRESSIVE KICKER LOOP ***
 local function KickTargetUntilLeft(target)
     if not target or not target.Parent then return end
+
+	if ActiveKickTargets[target.UserId] then return end
+    ActiveKickTargets[target.UserId] = true
     
     local strangerName = target.Name -- Capture name before they leave
     print("⚔️ ENGAGING: " .. strangerName)
@@ -252,6 +256,8 @@ local function KickTargetUntilLeft(target)
     -- LOOP BROKEN = PLAYER LEFT
     print("✅ Target Removed: " .. strangerName)
     SendKickSuccessWebhook(strangerName)
+
+	ActiveKickTargets[target.UserId] = nil
 end
 
 local function ScanAndKick()
