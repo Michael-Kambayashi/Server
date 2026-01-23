@@ -289,7 +289,7 @@ end
 
 local function OnStateChanged()
     local state = Workspace:GetAttribute("GameState")
-    if state == "Intermission" or state == "Warmup" or sttate == "Buy Period" then
+    if state == "Intermission" or state == "Warmup" or state == "Buy Period" then
         TryJoinTeam()
     end
 end
