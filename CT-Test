@@ -514,6 +514,6 @@ table.insert(getgenv().FarmConnections, rejoinConn)
 -- 7. STARTUP CHECK
 -- ============================================================================
 local currentState = Workspace:GetAttribute("GameState")
-if currentState == "Intermission" or currentState == "Warmup" then
+if currentState == "Intermission" or currentState == "Warmup" or currentState == "Buy Period" then
     TryJoinTeam()
 end
