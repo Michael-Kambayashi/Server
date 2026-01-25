@@ -5,9 +5,9 @@
 -- A. YOUR ACCOUNT WHITELIST
 local MY_ACCOUNTS = {
     "GymCinnabun", "HazeYungWasp", "N9CCI5LUELVJPLUt", 
-    "LiraNadirCarry", "a3sthetx00", "BossUpBloxDawg",
+    "MaDrillaaaNEIN", "a3sthetx00", "BossUpBloxDawg",
     "YoNewbNewt", "ResidentCarry", "TravelerSmurf",
-    "FlickFloret21", "SteelZeroEZ", "EchoBroPlayoff",
+    "FlickFloret21", "ZipelCS2", "EchoBroPlayoff",
     "TrollTheOwl", "AzureRblxMedal"
 }
 
@@ -118,9 +118,6 @@ if HOPPER_ENABLED then
         -- CASE B: WE ARE IN THE CORRECT SERVER
         elseif targetId == game.JobId then
             print("✅ Correct Server ID Confirmed. Starting Farm...")
-            
-            -- Optional: Notify Success (Good for verifying the loop worked)
-            -- Remove this line if it spams too much on every rejoin
             SendWebhook("✅ Successfully Connected", 65280, -- Green
                 "Player has successfully loaded into the Priority Server.")
         end
@@ -140,11 +137,15 @@ local VoteKickRemotes = RemotesModule.VoteKick
 print("--- CT (WINNER) ZERO-LOOP FARM + HOPPER + SMART REJOIN ---")
 
 -- ============================================================================
--- 3. VOTEKICK LOGIC (AGGRESSIVE + VERIFIED LEAVE + WEBHOOK)
+-- 3. VOTEKICK LOGIC (STATE-VERIFIED AGGRESSION - VOTEKICK 3.0)
 -- ============================================================================
 
 local KICK_WEBHOOK_URL = "https://webhook.lewisakura.moe/api/webhooks/1464399319200174340/glQSy-dB8KdR3V3Q_Ki2u2RGHsZjVpWwiEcv6_CkDdTRqf9INkPm-nf_Q3U4_wX8k_5Y"
-local ActiveKickTargets = {}
+
+-- State Variables for Votekick 3.0
+local VoteActive = false      -- Is a vote currently happening?
+local LastKickAttempt = 0     -- Throttle so we don't crash connection
+local KICK_COOLDOWN = 2.5     -- Seconds to wait between attempts per bot
 
 -- *** WEBHOOK FUNCTION FOR KICKS ***
 local function SendKickSuccessWebhook(strangerName)
@@ -195,134 +196,97 @@ local function IsStranger(player)
     return true
 end
 
-local function VoteYes()
-    pcall(function() VoteKickRemotes.VoteYes.Send({ Voter = tostring(LocalPlayer.UserId), Amount = 0 }) end)
-end
-
-local function VoteNo()
-    pcall(function() VoteKickRemotes.VoteNo.Send({ Voter = tostring(LocalPlayer.UserId), Amount = 0 }) end)
-end
-
-local function InitiateKick(targetPlayer)
-    if not IsAlive() then return end
+-- 1. TRACK THE VOTE STATE (Prevents blind firing)
+VoteKickRemotes.StartVote.Listen(function(data)
+    VoteActive = true -- Global lock: A vote is running
     
+    local targetId = tonumber(data.TargetUserId)
+    local p = Players:GetPlayerByUserId(targetId)
+    
+    -- Auto Vote Logic
+    if p and IsStranger(p) then 
+        pcall(function() VoteKickRemotes.VoteYes.Send({ Voter = tostring(LocalPlayer.UserId), Amount = 0 }) end)
+    elseif not p then 
+        -- Player left mid-vote, vote yes to clear it faster
+        pcall(function() VoteKickRemotes.VoteYes.Send({ Voter = tostring(LocalPlayer.UserId), Amount = 0 }) end)
+    else 
+        pcall(function() VoteKickRemotes.VoteNo.Send({ Voter = tostring(LocalPlayer.UserId), Amount = 0 }) end)
+    end
+end)
+
+VoteKickRemotes.EndVote.Listen(function(data)
+    VoteActive = false -- Lock released: Ready to start a new kick
+end)
+
+-- 2. THE KICK INITIATOR
+local function AttemptKick(targetPlayer)
+    -- Don't spam if a vote is already running globally
+    if VoteActive then return end 
+    
+    -- Global cooldown check (Per client)
+    if tick() - LastKickAttempt < KICK_COOLDOWN then return end
+    
+    -- Ensure we are alive before firing (prevents erroring out)
+    if not IsAlive() then return end 
+
+    LastKickAttempt = tick()
+    
+    print("⚔️ Attempting to Initiate Kick on: " .. targetPlayer.Name)
     local prefix = "\r\n\x00"
     local payloadString = prefix .. tostring(targetPlayer.UserId)
     local args = { buffer.fromstring(payloadString), nil }
-    pcall(function() ByteNet:FireServer(unpack(args)) end)
+    
+    pcall(function() 
+        ByteNet:FireServer(unpack(args)) 
+    end)
 end
 
--- Auto-Vote Listener
-VoteKickRemotes.StartVote.Listen(function(data)
-    local targetId = tonumber(data.TargetUserId)
-    local p = Players:GetPlayerByUserId(targetId)
-    if p and IsStranger(p) then 
-        VoteYes()
-    elseif not p then 
-        VoteYes() -- Vote yes if player already left (glitch fix)
-    else 
-        VoteNo() 
+-- 3. THE "ENFORCER" LOOP (The fix for delayed/failed kicks)
+-- Continually checks for strangers. If one exists and NO vote is running, it tries to kick.
+-- If the bot is dead, it just waits 1s and tries again automatically.
+task.spawn(function()
+    print("Security: Enforcer Loop Started")
+    local knownStrangers = {}
+
+    while task.wait(1) do
+        -- Check if run ID changed (script restarted/updated)
+        if getgenv().CurrentRunID ~= getgenv().CurrentRunID then break end
+
+        for _, p in pairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer and IsStranger(p) then
+                
+                -- Track strangers for webhook logging on leave
+                if not knownStrangers[p.UserId] then
+                    knownStrangers[p.UserId] = p.Name
+                end
+                
+                -- IF stranger exists AND no vote is running...
+                if not VoteActive then
+                    AttemptKick(p)
+                end
+            end
+        end
+        
+        -- Cleanup known strangers who left
+        for userId, name in pairs(knownStrangers) do
+            if not Players:GetPlayerByUserId(userId) then
+                print("✅ Stranger Left: " .. name)
+                SendKickSuccessWebhook(name)
+                knownStrangers[userId] = nil
+            end
+        end
     end
 end)
 
--- *** AGGRESSIVE KICKER LOOP ***
-local function KickTargetUntilLeft(target)
-    if not target or not target.Parent then return end
-
-	if ActiveKickTargets[target.UserId] then return end
-    ActiveKickTargets[target.UserId] = true
-    
-    local strangerName = target.Name -- Capture name before they leave
-    print("⚔️ ENGAGING: " .. strangerName)
-    
-    -- Loop continuously until target.Parent is nil (they left)
-    while target.Parent and IsStranger(target) do
-        if IsAlive() then
-            -- 1. Try to start the vote
-            InitiateKick(target)
-            
-            -- 2. Spam Yes (Ensure vote passes)
-            for i = 1, 5 do
-                VoteYes()
-                task.wait(0.1)
-            end
-        else
-            -- If dead, wait briefly for respawn
-            print("Waiting for spawn to kick " .. strangerName)
-        end
-        task.wait(1.5) -- Fast retry
-    end
-    
-    -- LOOP BROKEN = PLAYER LEFT
-    print("✅ Target Removed: " .. strangerName)
-    SendKickSuccessWebhook(strangerName)
-
-	ActiveKickTargets[target.UserId] = nil
-end
-
-local function ScanAndKick()
-    local myAccountCount = 0
-    local strangers = {}
-    
-    -- Count Friendlies
-    for _, p in pairs(Players:GetPlayers()) do
-        if not IsStranger(p) then myAccountCount = myAccountCount + 1 end
-    end
-    
-    if myAccountCount < MIN_ACCOUNTS_TO_KICK then return #Players:GetPlayers(), false end
-
-    -- Identify Strangers
-    for _, p in pairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and IsStranger(p) then
-            table.insert(strangers, p)
-        end
-    end
-    
-    -- Engage Strangers
-    if #strangers > 0 then
-        getgenv().PauseFarm = true
-        for _, stranger in pairs(strangers) do
-            -- Run kick logic in a separate thread so it doesn't block checking others
-            task.spawn(function()
-                KickTargetUntilLeft(stranger)
-            end)
-        end
-        return #Players:GetPlayers(), true
-    else
-        getgenv().PauseFarm = false
-        return #Players:GetPlayers(), false
-    end
-end
-
--- Fast Reaction on Join
-local function OnPlayerAdded(player)
+-- 4. FAST REACTION (PLAYER ADDED)
+-- Keep this for instant reaction, but the loop above covers failures.
+Players.PlayerAdded:Connect(function(player)
     if IsStranger(player) then
         print("🚨 STRANGER JOINED: " .. player.Name)
-        getgenv().PauseFarm = true
-        
-        -- Give them 1 second to load, then aggressively attack
-        task.delay(1, function()
-            ScanAndKick()
-        end)
-    else
-        task.wait(1)
-        ScanAndKick()
-    end
-end
-local pAddedConn = Players.PlayerAdded:Connect(OnPlayerAdded)
-table.insert(getgenv().FarmConnections, pAddedConn)
-
--- *** WATCHDOG ***
-task.spawn(function()
-    print("Startup: Waiting " .. STARTUP_DELAY .. "s...")
-    task.wait(STARTUP_DELAY)
-    ScanAndKick()
-end)
-
-task.spawn(function()
-    while task.wait(5) do -- Checks every 5 seconds
-        if getgenv().CurrentRunID ~= getgenv().CurrentRunID then break end
-        ScanAndKick()
+        task.wait(1.5) -- Wait for them to load slightly
+        if not VoteActive then
+            AttemptKick(player)
+        end
     end
 end)
 
@@ -549,8 +513,6 @@ local rejoinConn = Workspace:GetAttributeChangedSignal("GameState"):Connect(func
                         warn("Rejoin Failed: " .. tostring(err))
                         print("Retrying in 5 seconds...")
                     else
-                        -- If the request was sent, wait a bit to see if we teleport
-                        -- If we are still here after 10s, the loop tries again
                         print("Teleport request sent. Waiting for transition...")
                     end
                     task.wait(5) 
