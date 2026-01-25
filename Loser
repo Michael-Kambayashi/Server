@@ -5,9 +5,9 @@
 -- A. YOUR ACCOUNT WHITELIST
 local MY_ACCOUNTS = {
     "GymCinnabun", "HazeYungWasp", "N9CCI5LUELVJPLUt", 
-    "LiraNadirCarry", "a3sthetx00", "BossUpBloxDawg",
+    "MaDrillaaaNEIN", "a3sthetx00", "BossUpBloxDawg",
     "YoNewbNewt", "ResidentCarry", "TravelerSmurf",
-    "FlickFloret21", "SteelZeroEZ", "EchoBroPlayoff",
+    "FlickFloret21", "ZipelCS2", "EchoBroPlayoff",
     "TrollTheOwl", "AzureRblxMedal"
 }
 
