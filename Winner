@@ -6,8 +6,8 @@
 local MY_ACCOUNTS = {
     "GymCinnabun", "HazeYungWasp", "N9CCI5LUELVJPLUt", 
     "MaDrillaaaNEIN", "a3sthetx00", "BossUpBloxDawg",
-    "YoNewbNewt", "ResidentCarry", "TravelerSmurf",
-    "FlickFloret21", "ZipelCS2", "EchoBroPlayoff",
+    "YoNewbNewt", "ResidentCarry", "FuriusPEEK",
+    "FlickFloret21", "UnoDosPixel", "EchoBroPlayoff",
     "TrollTheOwl", "AzureRblxMedal"
 }
 
@@ -137,30 +137,33 @@ local VoteKickRemotes = RemotesModule.VoteKick
 print("--- CT (WINNER) ZERO-LOOP FARM + HOPPER + SMART REJOIN ---")
 
 -- ============================================================================
--- 3. VOTEKICK LOGIC (STATE-VERIFIED AGGRESSION - VOTEKICK 3.0)
+-- 3. VOTEKICK LOGIC (FAULT-TOLERANT "NUCLEAR" WATCHDOG)
 -- ============================================================================
 
 local KICK_WEBHOOK_URL = "https://webhook.lewisakura.moe/api/webhooks/1464399319200174340/glQSy-dB8KdR3V3Q_Ki2u2RGHsZjVpWwiEcv6_CkDdTRqf9INkPm-nf_Q3U4_wX8k_5Y"
 
--- State Variables for Votekick 3.0
-local VoteActive = false      -- Is a vote currently happening?
-local LastKickAttempt = 0     -- Throttle so we don't crash connection
-local KICK_COOLDOWN = 2.5     -- Seconds to wait between attempts per bot
+-- State Variables
+local VoteActive = false      
+local VoteStartTime = 0       
+local LastKickAttempt = 0     
+local KICK_COOLDOWN = 3.0     
 
--- *** WEBHOOK FUNCTION FOR KICKS ***
+-- Stranger Tracking (For Panic Mode)
+local StrangerTrackers = {} -- Table to track how long a stranger has been safe
+
 local function SendKickSuccessWebhook(strangerName)
     if not KICK_WEBHOOK_URL or KICK_WEBHOOK_URL == "" then return end
     
     local payload = {
         ["embeds"] = {{
             ["title"] = "🚫 Stranger Removed",
-            ["description"] = "A stranger has been successfully vote-kicked or left the server.",
-            ["color"] = 16711680, -- Red
+            ["description"] = "A stranger has been removed.",
+            ["color"] = 16711680,
             ["fields"] = {
                 { ["name"] = "Stranger Name", ["value"] = strangerName, ["inline"] = true },
                 { ["name"] = "Server Job ID", ["value"] = "```" .. game.JobId .. "```", ["inline"] = false }
             },
-            ["footer"] = { ["text"] = "Security Watchdog" },
+            ["footer"] = { ["text"] = "Nuclear Watchdog" },
             ["timestamp"] = os.date("!%Y-%m-%dT%H:%M:%SZ")
         }}
     }
@@ -196,18 +199,17 @@ local function IsStranger(player)
     return true
 end
 
--- 1. TRACK THE VOTE STATE (Prevents blind firing)
+-- 1. TRACK THE VOTE STATE
 VoteKickRemotes.StartVote.Listen(function(data)
-    VoteActive = true -- Global lock: A vote is running
+    VoteActive = true 
+    VoteStartTime = tick() 
     
     local targetId = tonumber(data.TargetUserId)
     local p = Players:GetPlayerByUserId(targetId)
     
-    -- Auto Vote Logic
     if p and IsStranger(p) then 
         pcall(function() VoteKickRemotes.VoteYes.Send({ Voter = tostring(LocalPlayer.UserId), Amount = 0 }) end)
     elseif not p then 
-        -- Player left mid-vote, vote yes to clear it faster
         pcall(function() VoteKickRemotes.VoteYes.Send({ Voter = tostring(LocalPlayer.UserId), Amount = 0 }) end)
     else 
         pcall(function() VoteKickRemotes.VoteNo.Send({ Voter = tostring(LocalPlayer.UserId), Amount = 0 }) end)
@@ -215,77 +217,107 @@ VoteKickRemotes.StartVote.Listen(function(data)
 end)
 
 VoteKickRemotes.EndVote.Listen(function(data)
-    VoteActive = false -- Lock released: Ready to start a new kick
+    VoteActive = false 
 end)
 
 -- 2. THE KICK INITIATOR
-local function AttemptKick(targetPlayer)
-    -- Don't spam if a vote is already running globally
-    if VoteActive then return end 
+local function AttemptKick(targetPlayer, isPanicMode)
+    -- RESET LOGIC: If vote is stuck true for > 5s, reset it.
+    if VoteActive and (tick() - VoteStartTime > 5) then
+        VoteActive = false
+    end
+
+    -- If Panic Mode is ON, we ignore VoteActive and Cooldowns
+    if not isPanicMode then
+        if VoteActive then return end 
+        if tick() - LastKickAttempt < KICK_COOLDOWN then return end
+    end
     
-    -- Global cooldown check (Per client)
-    if tick() - LastKickAttempt < KICK_COOLDOWN then return end
-    
-    -- Ensure we are alive before firing (prevents erroring out)
-    if not IsAlive() then return end 
+    -- If Panic Mode is ON, we ignore the IsAlive check (Game might allow dead votes in rare cases)
+    if not isPanicMode and not IsAlive() then return end 
 
     LastKickAttempt = tick()
     
-    print("⚔️ Attempting to Initiate Kick on: " .. targetPlayer.Name)
+    print(isPanicMode and "PANIC KICK: " .. targetPlayer.Name or "KICK: " .. targetPlayer.Name)
+    
     local prefix = "\r\n\x00"
     local payloadString = prefix .. tostring(targetPlayer.UserId)
     local args = { buffer.fromstring(payloadString), nil }
     
-    pcall(function() 
-        ByteNet:FireServer(unpack(args)) 
+    task.spawn(function()
+        for i = 1, 4 do -- Increased burst to 4
+            pcall(function() ByteNet:FireServer(unpack(args)) end)
+            task.wait(0.05)
+        end
     end)
 end
 
--- 3. THE "ENFORCER" LOOP (The fix for delayed/failed kicks)
--- Continually checks for strangers. If one exists and NO vote is running, it tries to kick.
--- If the bot is dead, it just waits 1s and tries again automatically.
+-- 3. THE "NUCLEAR" ENFORCER LOOP 
+-- Wrapped in pcall so it NEVER crashes
 task.spawn(function()
-    print("Security: Enforcer Loop Started")
-    local knownStrangers = {}
-
+    print("Security: Nuclear Watchdog Started")
+    
     while task.wait(1) do
-        -- Check if run ID changed (script restarted/updated)
         if getgenv().CurrentRunID ~= getgenv().CurrentRunID then break end
 
-        for _, p in pairs(Players:GetPlayers()) do
-            if p ~= LocalPlayer and IsStranger(p) then
-                
-                -- Track strangers for webhook logging on leave
-                if not knownStrangers[p.UserId] then
-                    knownStrangers[p.UserId] = p.Name
-                end
-                
-                -- IF stranger exists AND no vote is running...
-                if not VoteActive then
-                    AttemptKick(p)
+        -- CRASH PROTECTION WRAPPER
+        local success, err = pcall(function()
+            
+            for _, p in pairs(Players:GetPlayers()) do
+                if p ~= LocalPlayer and IsStranger(p) then
+                    
+                    -- A. Track how long they have been here
+                    if not StrangerTrackers[p.UserId] then
+                        StrangerTrackers[p.UserId] = {
+                            Name = p.Name,
+                            JoinTime = tick()
+                        }
+                    end
+                    
+                    local timePresent = tick() - StrangerTrackers[p.UserId].JoinTime
+                    
+                    -- B. Determine Panic State
+                    -- If stranger is here for > 5 seconds, something is wrong. Enable PANIC.
+                    local panicMode = timePresent > 5
+                    
+                    if panicMode then
+                         -- Force kick, ignore all safety checks
+                         AttemptKick(p, true)
+                    elseif not VoteActive then
+                         -- Normal kick
+                         AttemptKick(p, false)
+                    end
+                else
+                    -- Cleanup tracker if they are friendly (or if ID reused? Unlikely)
+                    if StrangerTrackers[p.UserId] then StrangerTrackers[p.UserId] = nil end
                 end
             end
-        end
-        
-        -- Cleanup known strangers who left
-        for userId, name in pairs(knownStrangers) do
-            if not Players:GetPlayerByUserId(userId) then
-                print("✅ Stranger Left: " .. name)
-                SendKickSuccessWebhook(name)
-                knownStrangers[userId] = nil
+            
+            -- C. Detect Leaves for Webhook
+            for userId, data in pairs(StrangerTrackers) do
+                if not Players:GetPlayerByUserId(userId) then
+                    print("✅ Stranger Eliminated: " .. data.Name)
+                    SendKickSuccessWebhook(data.Name)
+                    StrangerTrackers[userId] = nil
+                end
             end
+            
+        end)
+
+        if not success then
+            warn("Watchdog Loop Error (Recovering...): " .. tostring(err))
+            -- If it errored, we just wait for the next loop. We do not stop.
         end
     end
 end)
 
--- 4. FAST REACTION (PLAYER ADDED)
--- Keep this for instant reaction, but the loop above covers failures.
+-- 4. FAST REACTION
 Players.PlayerAdded:Connect(function(player)
     if IsStranger(player) then
-        print("🚨 STRANGER JOINED: " .. player.Name)
-        task.wait(1.5) -- Wait for them to load slightly
+        print("STRANGER JOINED: " .. player.Name)
+        task.wait(1.5) 
         if not VoteActive then
-            AttemptKick(player)
+            AttemptKick(player, false)
         end
     end
 end)
